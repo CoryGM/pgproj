@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/CoryGM/pgproj/blob/main/docs/troubleshooting.md
+    about: What pgproj's common messages mean, and what to do about them.
+  - name: Command reference
+    url: https://github.com/CoryGM/pgproj/blob/main/docs/commands.md
+    about: Every command and option, with examples.
