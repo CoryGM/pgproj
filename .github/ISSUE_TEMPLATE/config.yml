@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions and ideas
+    url: https://github.com/CoryGM/pgproj/discussions
+    about: Ask how to do something, or suggest something pgproj could do. Issues are for bugs.
   - name: Troubleshooting
     url: https://github.com/CoryGM/pgproj/blob/main/docs/troubleshooting.md
     about: What pgproj's common messages mean, and what to do about them.
