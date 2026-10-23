@@ -1,5 +1,6 @@
 # Shell scripts must keep LF line endings, including on a Windows checkout (G-81).
 *.sh text eol=lf
+*.awk text eol=lf   # read by awk in the Linux containers of packaging/linux (G-331)
 
 # C# source keeps LF on every checkout, whatever core.autocrlf says (G-145). A raw-string literal ("""...""")
 # takes the line endings of its file, and tests edit those strings with text that contains \n; on a CRLF
