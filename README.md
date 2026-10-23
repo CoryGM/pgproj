@@ -361,3 +361,6 @@ pgproj is licensed under the [Apache License, Version 2.0](LICENSE); see also [`
 [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt). pgproj is not accepting contributions yet: pull requests from outside the project are
 closed without review. [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`DEVELOPING.md`](DEVELOPING.md) describe how contributions will work once they
 are, including the [Contributor License Agreement](CLA.md) every contributor signs.
+
+Found a bug? Open an [issue](https://github.com/CoryGM/pgproj/issues/new/choose) with the output of `pgproj about`. A question or an idea goes in
+[Discussions](https://github.com/CoryGM/pgproj/discussions). A security problem is reported privately: see [`SECURITY.md`](SECURITY.md).
