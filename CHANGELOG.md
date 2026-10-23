@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-23
+
 The first release of pgproj: a PostgreSQL database's schema kept as plain SQL files in source control, built, compared with a
 live database, and deployed, the way SQL Server Data Tools does it for SQL Server.
 
@@ -97,7 +99,9 @@ live database, and deployed, the way SQL Server Data Tools does it for SQL Serve
 
 - PostgreSQL 14, 15, 16, 17, and 18 ([PostgreSQL versions](docs/notes/postgresql-versions.md)).
 - Self-contained builds (no .NET installation needed) for Linux (x64, arm64), Windows (x64, arm64), and macOS (Apple silicon):
-  `.tar.gz`, `.zip`, `.deb`, `.rpm`, and an `.msi` installer, with `SHA256SUMS.txt` and a software bill of materials. The `.deb` and `.rpm` install
+  `.tar.gz`, `.zip`, `.deb`, `.rpm`, and an `.msi` installer, with `SHA256SUMS.txt`, a software bill of materials, and build provenance
+  (`gh attestation verify <file> --repo CoryGM/pgproj`). The `.deb` and `.rpm` install
   what pgproj needs from the system, the Kerberos library included; on a Linux system without it, connections do not try GSSAPI, so nothing is printed
   about it.
-- Licensed under the Apache License 2.0; contributions require a signed Contributor License Agreement ([`CLA.md`](CLA.md)).
+- Licensed under the Apache License 2.0. pgproj is not accepting contributions yet; when it does, they will require a signed Contributor License Agreement
+  ([`CLA.md`](CLA.md)).
