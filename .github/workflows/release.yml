@@ -89,7 +89,7 @@ jobs:
       - name: Install each package in a clean container and run it
         run: packaging/linux/verify-packages.sh dist "${{ needs.version.outputs.version }}" "${{ matrix.rid }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.rid }}
           path: |
@@ -160,7 +160,7 @@ jobs:
         shell: pwsh
         run: Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\signing.pfx"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.rid }}
           path: |
@@ -188,7 +188,7 @@ jobs:
       - name: Run the published application
         run: packaging/smoke-test.sh "dist/pgproj-${{ needs.version.outputs.version }}-osx-arm64/pgproj" "${{ needs.version.outputs.version }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: osx-arm64
           path: dist/*.tar.gz
@@ -214,7 +214,7 @@ jobs:
           test -f "nupkg/PgProj.Engine.${{ needs.version.outputs.version }}.nupkg"
           test -f "nupkg/PgProj.Engine.${{ needs.version.outputs.version }}.snupkg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nuget
           path: nupkg/*
