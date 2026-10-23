@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-23
+
 ### Commands
 
 - **`pgproj about`** prints what a bug report needs, safe to paste into an issue: pgproj's version and how it was installed, the operating system and
