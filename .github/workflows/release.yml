@@ -79,7 +79,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - uses: docker/setup-qemu-action@v3 # to run the arm64 packages
+      - uses: docker/setup-qemu-action@v4 # to run the arm64 packages
         with:
           platforms: arm64
 
