@@ -72,7 +72,7 @@ pgproj --version
 - **Linux:** pgproj needs OpenSSL 3 and ICU (`libicu`), and uses Kerberos (`libgssapi-krb5`) when it is there; the `.deb` and `.rpm` packages install
   all three.
 - **Checking a download:** every release has a `SHA256SUMS.txt` (`sha256sum --check --ignore-missing SHA256SUMS.txt`), signed in
-  `SHA256SUMS.txt.asc` with the [Linux signing key](packaging/linux/pgproj-signing-key.asc) (`gpg --import pgproj-signing-key.asc`, then
+  `SHA256SUMS.txt.asc` with the [Linux signing key](packaging/linux/pgproj-signing-key.asc) (fingerprint `2154 E140 C291 AF3C 079E  B30A C954 6AE5 6857 FE31`; `gpg --import pgproj-signing-key.asc`, then
   `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`), build provenance (`gh attestation verify <file> --repo CoryGM/pgproj`), and a software bill of
   materials. The `.rpm` packages are signed with the same key; apt checks the `.deb` packages through the signed repository.
 
