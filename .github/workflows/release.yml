@@ -283,7 +283,7 @@ jobs:
 
       - name: Attest build provenance # not available to a private repository on this plan
         if: github.event.repository.private == false
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*
 
