@@ -20,6 +20,24 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
+  <!--
+    The .NET tool pgproj on nuget.org (G-323; dotnet tool install -g pgproj), released with the engine's package and the same version. It is
+    framework-dependent, so it needs the .NET 10 runtime, and it carries libpg_query for the five runtimes under runtimes/<rid>/native (a build without
+    a runtime identifier keeps them all; KeepOnlyThisRuntimesNativeLibrary below runs only for one). packaging/nuget/verify-tool.sh checks it.
+  -->
+  <PropertyGroup>
+    <PackageId>pgproj</PackageId>
+    <PackageTags>postgresql;postgres;schema;migration;database-project;ddl;sql;cli;dotnet-tool</PackageTags>
+    <PackageProjectUrl>https://github.com/CoryGM/pgproj</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../NOTICE" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\PgProj.Core\PgProj.Core.csproj" />
     <ProjectReference Include="..\PgProj.Parser\PgProj.Parser.csproj" />

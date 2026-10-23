@@ -32,7 +32,7 @@ your own tools. Coming from EF Core migrations, Flyway, or DbUp? [Why pgproj?](d
 
 ## Installing
 
-The builds are self-contained: **no .NET installation is needed** to run them.
+The builds are self-contained: **no .NET installation is needed** to run them. If you have .NET 10, the .NET tool is the quickest way.
 
 **Debian, Ubuntu, Fedora, RHEL:** install from pgproj's signed package repositories, so updates come with the system's own (amd64/x86_64 and
 arm64/aarch64; [all the details](https://corygm.github.io/pgproj/)):
@@ -47,6 +47,13 @@ sudo apt update && sudo apt install pgproj
 # Fedora, RHEL
 sudo curl -fsSL -o /etc/yum.repos.d/pgproj.repo https://corygm.github.io/pgproj/pgproj.repo
 sudo dnf install pgproj
+```
+
+**With .NET 10** (any of the platforms below): install the [.NET tool](https://www.nuget.org/packages/pgproj) from nuget.org, and update it with
+`dotnet tool update --global pgproj`. Unlike the other builds it needs the .NET 10 runtime installed.
+
+```sh
+dotnet tool install --global pgproj
 ```
 
 **Everything else**, and the same packages as files: the [releases page](https://github.com/CoryGM/pgproj/releases).
