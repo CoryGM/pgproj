@@ -21,18 +21,11 @@ pgproj brings this experience to PostgreSQL.
 
 ## Why pgproj exists
 
-PostgreSQL has no SSDT equivalent.  
-Developers typically rely on:
+PostgreSQL has good schema tools, but none that works the way SSDT does for a .NET team: the schema kept as plain SQL files, compiled and checked
+before a database is involved, and deployed from the .NET toolchain. Migration tools (EF Core migrations, Flyway, DbUp) record changes rather than the
+schema; state-based tools such as Atlas and pgCodeKeeper compare schemas, each with its own focus ([Why pgproj?](docs/why-pgproj.md) compares them).
 
-- handwritten migration scripts  
-- ORMs that generate partial SQL  
-- tools that diff live databases without understanding SQL deeply  
-- ad‑hoc deployment processes  
-
-None of these provide the guarantees SSDT provides for SQL Server.
-
-pgproj fills that gap by treating SQL as a **compilable language** and database
-schemas as **semantic programs**.
+pgproj fills that niche by treating SQL as a **compilable language** and database schemas as **semantic programs**.
 
 ---
 
@@ -45,7 +38,7 @@ schemas as **semantic programs**.
 - Produce precise added/removed/modified change sets  
 - Generate deterministic SQL migration scripts  
 - Run all of it as a library (`PgProj.Engine`) that any front end can call and get structured results from  
-- Provide a CLI (`init`, `build`, `diff`, `publish`, `document`) for scaffolding, validation, comparison, and deployment, as the first front end over that library  
+- Provide a CLI (`init`, `build`, `diff`, `publish`, `document`, `about`) for scaffolding, validation, comparison, and deployment, as the first front end over that library  
 
 This mirrors the SSDT workflow, but for PostgreSQL.
 
