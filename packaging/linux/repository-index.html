@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pgproj package repositories</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --code: #f6f8fa; --line: #d1d9e0; --link: #0969da; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --code: #161b22; --line: #3d444d; --link: #4493f8; } }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 4px; }
+  h2 { font-size: 1.25rem; margin: 32px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  p, li { color: var(--fg); }
+  .muted { color: var(--muted); }
+  a { color: var(--link); }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 0.875rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+</style>
+</head>
+<body>
+<main>
+<h1>pgproj package repositories</h1>
+<p class="muted">Signed apt and dnf repositories for <a href="https://github.com/CoryGM/pgproj">pgproj</a>, a PostgreSQL database project compiler:
+amd64/x86_64 and arm64/aarch64. The packages are self-contained; they need only the system libraries they declare.</p>
+
+<h2>Debian and Ubuntu (apt)</h2>
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL @URL@/pgproj.asc | sudo tee /etc/apt/keyrings/pgproj.asc &gt;/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/pgproj.asc] @URL@/apt stable main" | sudo tee /etc/apt/sources.list.d/pgproj.list
+sudo apt update &amp;&amp; sudo apt install pgproj</code></pre>
+
+<h2>Fedora, RHEL, and other dnf systems</h2>
+<pre><code>sudo curl -fsSL -o /etc/yum.repos.d/pgproj.repo @URL@/pgproj.repo
+sudo dnf install pgproj</code></pre>
+<p>dnf asks to import the key the first time; it is the one below.</p>
+
+<h2>Release candidates</h2>
+<p>The <code>testing</code> channel holds the newest release candidate, when there is one newer than the latest release. Add it beside
+<code>stable</code>: for apt, a second line ending in <code>testing main</code>; for dnf, <code>@URL@/pgproj-testing.repo</code>.</p>
+
+<h2>The signing key</h2>
+<p>The repositories' metadata and the <code>.rpm</code> packages are signed with <a href="@URL@/pgproj.asc">pgproj.asc</a>, fingerprint <code>2154 E140 C291 AF3C 079E  B30A C954 6AE5 6857 FE31</code>. It is also
+in the project's <a href="https://github.com/CoryGM/pgproj/blob/main/packaging/linux/pgproj-signing-key.asc">repository</a> and on each
+release page. The same packages, and every other build, are on the
+<a href="https://github.com/CoryGM/pgproj/releases">GitHub releases</a>, with checksums and build provenance.</p>
+</main>
+</body>
+</html>

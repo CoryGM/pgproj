@@ -11,10 +11,17 @@ name: Release
 # variable NUGET_PUBLISH is "true" (Settings > Secrets and variables > Actions > Variables), set once the policy exists; without it a tag makes
 # the GitHub Release and skips nuget.org.
 #
+# The Linux packages are signed (G-331): the .rpm files, the release's SHA256SUMS.txt (SHA256SUMS.txt.asc), and the signed apt and dnf
+# repositories that a tag publishes to GitHub Pages (https://corygm.github.io/pgproj, packaging/linux/build-repository.sh). Without the key a
+# throwaway one is used to test every signing step, and nothing signed with it is released or published.
+#
 # Optional secrets (Settings > Secrets and variables > Actions):
 #   WINDOWS_SIGNING_CERT_BASE64    the code-signing certificate (.pfx), base64-encoded
 #   WINDOWS_SIGNING_CERT_PASSWORD  its password
-# Without them the Windows files are built unsigned. macOS files are never signed by an Apple Developer ID or notarized.
+#   LINUX_SIGNING_KEY              the Linux signing key, an armored OpenPGP secret key (DEVELOPING.md, "Releasing", Signing)
+#   LINUX_SIGNING_PASSPHRASE       its passphrase
+# Without them the Windows files are built unsigned, and the Linux .rpm files and checksums are unsigned and no repository is published. macOS
+# files are never signed by an Apple Developer ID or notarized.
 
 on:
   push:
@@ -96,6 +103,81 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+          if-no-files-found: error
+
+  linux-signing:
+    name: Linux signing and repositories
+    needs: [version, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4 # to install the arm64 packages
+        with:
+          platforms: arm64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-x64
+          path: dist/linux-x64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-arm64
+          path: dist/linux-arm64
+
+      - name: The signing key (the release key, or a throwaway one without the secrets)
+        id: key
+        env:
+          LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+          LINUX_SIGNING_PASSPHRASE: ${{ secrets.LINUX_SIGNING_PASSPHRASE }}
+        run: |
+          output="$(packaging/linux/signing-key.sh "$RUNNER_TEMP/signing")"
+          kind="$(sed -n 1p <<<"$output")"
+          fingerprint="$(sed -n 2p <<<"$output")"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "Signing with the $kind key $fingerprint"
+          # The release key must be the one the repository publishes, so a user can check it against the file in the repository.
+          if [[ "$kind" == release ]]; then
+            published="$(gpg --batch --with-colons --show-keys packaging/linux/pgproj-signing-key.asc | awk -F: '/^fpr/ { print $10; exit }')"
+            [[ "$published" == "$fingerprint" ]] || { echo "LINUX_SIGNING_KEY ($fingerprint) is not packaging/linux/pgproj-signing-key.asc ($published)" >&2; exit 1; }
+          fi
+
+      - name: Sign the .rpm packages
+        run: |
+          packaging/linux/sign-rpms.sh dist/linux-x64 "$RUNNER_TEMP/signing"
+          packaging/linux/sign-rpms.sh dist/linux-arm64 "$RUNNER_TEMP/signing"
+
+      - name: Build the repositories from this version, and install from them in clean containers
+        run: |
+          channel=stable
+          if [[ "${{ needs.version.outputs.prerelease }}" == "true" ]]; then channel=testing; fi
+          mkdir -p packages/this packages/none
+          cp dist/linux-*/*.deb dist/linux-*/*.rpm packages/this/
+          if [[ "$channel" == stable ]]; then
+            packaging/linux/build-repository.sh site "$RUNNER_TEMP/signing" packages/this packages/this
+          else
+            packaging/linux/build-repository.sh site "$RUNNER_TEMP/signing" packages/none packages/this
+          fi
+          packaging/linux/verify-repository.sh site "$channel" "${{ needs.version.outputs.version }}" linux-x64
+          packaging/linux/verify-repository.sh site "$channel" "${{ needs.version.outputs.version }}" linux-arm64
+
+      # With the release key the signed .rpm files replace the unsigned ones, so the GitHub Release has them; a throwaway signature is not kept.
+      - uses: actions/upload-artifact@v7
+        if: steps.key.outputs.kind == 'release'
+        with:
+          name: linux-x64
+          path: dist/linux-x64/*
+          overwrite: true
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: steps.key.outputs.kind == 'release'
+        with:
+          name: linux-arm64
+          path: dist/linux-arm64/*
+          overwrite: true
           if-no-files-found: error
 
   windows:
@@ -248,12 +330,14 @@ jobs:
   release:
     name: GitHub Release
     if: github.ref_type == 'tag'
-    needs: [version, linux, windows, macos, nuget-verify]
+    needs: [version, linux, linux-signing, windows, macos, nuget-verify]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
       id-token: write # build provenance
       attestations: write
+    env:
+      HAS_LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -280,6 +364,16 @@ jobs:
           sha256sum -- * > ../SHA256SUMS.txt
           mv ../SHA256SUMS.txt SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Sign the checksums, and attach the public key
+        if: env.HAS_LINUX_SIGNING_KEY == 'true'
+        env:
+          LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+          LINUX_SIGNING_PASSPHRASE: ${{ secrets.LINUX_SIGNING_PASSPHRASE }}
+        run: |
+          packaging/linux/signing-key.sh "$RUNNER_TEMP/signing"
+          packaging/linux/sign-file.sh dist/SHA256SUMS.txt "$RUNNER_TEMP/signing"
+          cp packaging/linux/pgproj-signing-key.asc dist/pgproj-signing-key.asc
 
       - name: Attest build provenance # not available to a private repository on this plan
         if: github.event.repository.private == false
@@ -323,3 +417,53 @@ jobs:
 
       - name: Push PgProj.Engine and its symbols
         run: dotnet nuget push "nupkg/PgProj.Engine.${{ needs.version.outputs.version }}.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  repository:
+    name: Publish the apt and dnf repositories
+    if: github.ref_type == 'tag'
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pages: write # deploy to GitHub Pages
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    env:
+      HAS_LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY != '' }}
+    steps:
+      - name: Without the signing key nothing is published
+        if: env.HAS_LINUX_SIGNING_KEY != 'true'
+        run: echo "::notice::LINUX_SIGNING_KEY is not set, so the apt and dnf repositories were not published."
+
+      - uses: actions/checkout@v7
+        if: env.HAS_LINUX_SIGNING_KEY == 'true'
+
+      - name: Build the repositories from the releases
+        if: env.HAS_LINUX_SIGNING_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+          LINUX_SIGNING_PASSPHRASE: ${{ secrets.LINUX_SIGNING_PASSPHRASE }}
+        run: |
+          packaging/linux/signing-key.sh "$RUNNER_TEMP/signing"
+          packaging/linux/collect-releases.sh packages/stable packages/testing
+          packaging/linux/build-repository.sh site "$RUNNER_TEMP/signing" packages/stable packages/testing
+          channel=stable
+          if [[ "${{ needs.version.outputs.prerelease }}" == "true" ]]; then channel=testing; fi
+          packaging/linux/verify-repository.sh site "$channel" "${{ needs.version.outputs.version }}" linux-x64
+
+      - uses: actions/upload-pages-artifact@v3
+        if: env.HAS_LINUX_SIGNING_KEY == 'true'
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        if: env.HAS_LINUX_SIGNING_KEY == 'true'
+        uses: actions/deploy-pages@v4
