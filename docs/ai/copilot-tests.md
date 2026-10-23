@@ -54,8 +54,8 @@ moves from change to change), and to **compare performance characteristics befor
 longer quadruples a step's time). A timed test must still not be flaky. It compares measurements taken in the same run (one size against another,
 one way against another) rather than an absolute number of milliseconds, and it allows a generous margin, so a slow or busy machine does not fail it.
 Where a deterministic check exists (a counter of the work done, as G-310's `TextPassCounter` and G-314's `ColumnKeyLookup` count), prefer it, or use
-both. A timed test carries `[TestCategory("Performance")]` and `[DoNotParallelize]`, times with its project's `TimedRuns` (after a warm-up; the
-parser's takes the fastest run, G-327), and is checked to fail against the code before the change it guards where that code can be run (G-321).
+both. A timed test carries `[TestCategory("Performance")]` and `[DoNotParallelize]`, times with its project's `TimedRuns` (after a warm-up, the fastest of
+the runs: a busy machine only adds time, G-327, G-330), and is checked to fail against the code before the change it guards where that code can be run (G-321).
 
 ---
 

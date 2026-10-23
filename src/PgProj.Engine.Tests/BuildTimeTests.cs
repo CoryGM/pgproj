@@ -6,6 +6,7 @@ namespace PgProj.Engine.Tests;
 /// G-321: what G-311 and G-313 made faster stays faster, timed as <c>copilot-tests.md</c> §3 allows, each comparing two ways of doing the same work in one
 /// run with a wide margin: a build after one edit with a <see cref="ParseCache"/> against a build without it, and a check of one document against a build
 /// of its project. The project is one where parsing is a large share of a build: a thousand files, each a table with long comments.
+/// G-330 times the fastest run of each, as G-327 did for the parser's tests, after a median failed a timed test on a busy CI runner.
 /// </summary>
 [TestClass]
 [TestCategory("Performance")]
@@ -27,8 +28,8 @@ public sealed class BuildTimeTests
         void EditOneFile() => files.Set(File(5), Text(5) + $"-- edit {edit++}\n");
 
         // Act
-        var withoutCache = TimedRuns.Median(() => { EditOneFile(); Build(cold); });
-        var withCache = TimedRuns.Median(() => { EditOneFile(); Build(cached); });
+        var withoutCache = TimedRuns.Fastest(() => { EditOneFile(); Build(cold); });
+        var withCache = TimedRuns.Fastest(() => { EditOneFile(); Build(cached); });
 
         // Assert: about a third of the time on this project (G-311 measured 65 ms against 211 ms); a cache that never hits measures about 0.9.
         Assert.IsLessThan(0.6, withCache / withoutCache, $"with the cache {withCache.TotalMilliseconds:F0} ms, without {withoutCache.TotalMilliseconds:F0} ms");
@@ -43,8 +44,8 @@ public sealed class BuildTimeTests
         var check = new DocumentCheckRequest { Files = files, ProjectFilePath = ProjectFile, DocumentPath = File(5) };
 
         // Act
-        var building = TimedRuns.Median(() => Build(build));
-        var checking = TimedRuns.Median(() => new PgProjEngine().CheckDocumentAsync(check).GetAwaiter().GetResult());
+        var building = TimedRuns.Fastest(() => Build(build));
+        var checking = TimedRuns.Fastest(() => new PgProjEngine().CheckDocumentAsync(check).GetAwaiter().GetResult());
 
         // Assert: a hundredth of the time or less on this project (G-313); a fifth is the bound.
         Assert.IsLessThan(0.2, checking / building, $"the check {checking.TotalMilliseconds:F0} ms, the build {building.TotalMilliseconds:F0} ms");
