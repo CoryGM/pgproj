@@ -16,7 +16,8 @@ statements that bring a database there.
   and diagram from your comments.
 
 It works with PostgreSQL 14, 15, 16, 17, and 18, runs on Windows, Linux, and macOS, and is also a .NET library, `PgProj.Engine`, for building it into
-your own tools. Coming from EF Core migrations, Flyway, or DbUp? [Why pgproj?](docs/why-pgproj.md) compares the two approaches.
+your own tools. Choosing between pgproj, EF Core migrations, Flyway, Atlas, or pgCodeKeeper? [Why pgproj?](docs/why-pgproj.md) compares them and
+says which fits which situation.
 
 ## Contents
 
@@ -342,7 +343,7 @@ linux-x64, linux-arm64, and osx-arm64; it is released with the command line, wit
 
 ## Learn more
 
-- [Why pgproj?](docs/why-pgproj.md): how a state-based tool differs from EF Core migrations, Flyway, and DbUp, and when each fits.
+- [Why pgproj?](docs/why-pgproj.md): migration-based and state-based tools, pgproj side by side with EF Core migrations, Flyway, Atlas, and pgCodeKeeper, and which fits which situation.
 - [Command reference](docs/commands.md): every command and option.
 - [CI/CD](docs/ci.md): checking every pull request, catching drift, and deploying with a review, with GitHub Actions workflows to copy.
 - [Troubleshooting](docs/troubleshooting.md): what a message means and what to do about it.

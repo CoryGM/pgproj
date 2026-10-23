@@ -12,7 +12,7 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Promoting between environments](promoting-environments.md) — a live database as the desired state: `--source-connection`, `--target-connection`, parity checks, and CI
 - [CI/CD](../ci.md) — checking every pull request, catching drift, and deploying with a review, with GitHub Actions workflows
 - [Troubleshooting](../troubleshooting.md) — what a message means and what to do about it
-- [Why pgproj?](../why-pgproj.md) — how a state-based tool compares with EF Core migrations, Flyway, and DbUp
+- [Why pgproj?](../why-pgproj.md) — pgproj side by side with EF Core migrations, Flyway, Atlas, and pgCodeKeeper, and which fits which situation
 - [Using pgproj as a library](../library.md) — `PgProj.Engine` for an editor, a language server, or a web service: the file sources, the calls, their results, and the JSON document
 
 ## The basics
