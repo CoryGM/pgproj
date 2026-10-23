@@ -95,7 +95,7 @@ internal static class EndToEndSupport
         await command.ExecuteNonQueryAsync();
     }
 
-    /// <summary>Runs <c>init</c>, <c>build</c>, <c>diff</c>, <c>publish</c>, or <c>document</c> in process; standard output and error are captured together.</summary>
+    /// <summary>Runs <c>init</c>, <c>build</c>, <c>diff</c>, <c>publish</c>, <c>document</c>, or <c>about</c> in process; standard output and error are captured together.</summary>
     internal static async Task<(int ExitCode, string Output)> RunAsync(params string[] args)
     {
         var context = PostgresContainerFixture.CreateCliContext();
@@ -106,6 +106,7 @@ internal static class EndToEndSupport
             DiffCommand.Create(context),
             PublishCommand.Create(context),
             DocumentCommand.Create(context),
+            AboutCommand.Create(context),
         };
 
         var originalOut = Console.Out;

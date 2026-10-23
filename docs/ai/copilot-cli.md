@@ -87,6 +87,11 @@ Copilot must preserve:
 - (G-162) `document` warns about a starter-set tag on a kind of object it does not apply to (classification and retention: schema, table, view, column; pii: table, view, column; example: column, constraint, routine, type); a warning does not change the exit code.
 - (G-163) `COMMENT ON TRIGGER` is modeled on the same rules as a constraint's comment: `init` scaffolds it, `diff` and `publish` compare and apply a comment the project states (in place, without dropping the trigger), a recreated trigger keeps its comment, and `document` lists each table's triggers with their comments.
 - (G-164) `COMMENT ON POLICY` is modeled on the same rules as a trigger's comment: `init` scaffolds it, `diff` and `publish` compare and apply a comment the project states (in place, without dropping the policy), a recreated policy keeps its comment, and `document` lists each table's row-level security policies with their comments.
+- `about` (a sixth command, G-332, the user's design of 2026-10-23): --project, --target-connection, --source-connection (each resolved as the other commands
+  resolve it: the option, the environment variable, then `pgproj.json`), --verbose / --quiet. It prints `PgProjEngine.AboutAsync`'s result for a bug report:
+  the version, how pgproj was installed (`InstallKind`, the shell's), the operating system, the runtime, whether libpg_query loads, the project as read (not
+  built), and each database with where its connection string came from and, connected to within five seconds, the server's version and the role's
+  privileges. It exits 0 whatever it could not read (a missing project, a refused login); it only reads; it never prints a password.
 - --verbose / --quiet (every command: `--verbose` adds `[verbose]` progress lines on standard error, `--quiet` leaves out progress,
   warnings, and notices and keeps the result and the errors; the two cannot be combined; a result is never filtered; secrets are
   masked in every line — G-143, design agreed by the user 2026-10-01)

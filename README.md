@@ -308,6 +308,7 @@ Paths are relative to the folder `pgproj.json` is in. [`pgproj.json.md`](pgproj.
 | [`pgproj diff`](docs/commands.md#diff) | Compares the project with a live database and lists what is added, removed, and changed. |
 | [`pgproj publish`](docs/commands.md#publish) | Writes the script that brings a database up to date, and runs it in one transaction with `--execute`. |
 | [`pgproj document`](docs/commands.md#document) | Writes a data dictionary and a diagram of the project or a database, as HTML, Markdown, and JSON. |
+| [`pgproj about`](docs/commands.md#about) | Prints pgproj's version and environment, the project it finds, and its databases: paste it into a bug report. |
 
 `pgproj --help` lists them, and `pgproj <command> --help` shows a command's options with examples. The [command reference](docs/commands.md) has every
 option in full, including `--verbose` and `--quiet`, `--format json` for editors and CI, and `--erd`, which draws the project's tables as a diagram.

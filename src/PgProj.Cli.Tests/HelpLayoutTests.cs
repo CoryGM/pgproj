@@ -13,7 +13,7 @@ public sealed class HelpLayoutTests
 {
     private const int Width = 100;
 
-    private static readonly string[] CommandNames = ["init", "build", "diff", "publish", "document"];
+    private static readonly string[] CommandNames = ["init", "build", "diff", "publish", "document", "about"];
 
     [TestMethod]
     public void TheRootListsEachCommandOnOneLineWithItsSummaryAndABlankLineBetween()

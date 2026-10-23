@@ -3,7 +3,7 @@
 Every `pgproj` command and option, in full. For what pgproj is, how to install it, and a first project, start with the [README](../README.md);
 `pgproj --help` and `pgproj <command> --help` print the same options at the terminal.
 
-- [The commands](#commands): [`init`](#init), [`build`](#build), [`diff`](#diff), [`publish`](#publish), [`document`](#document)
+- [The commands](#commands): [`init`](#init), [`build`](#build), [`diff`](#diff), [`publish`](#publish), [`document`](#document), [`about`](#about)
 - [Promoting between environments](#promoting-between-environments): the rules of `--source-connection` on `build`, `diff`, and `publish`
 - [Options every command takes](#options-every-command-takes): `--help`, `--verbose` and `--quiet`, and the diagram (`--erd`)
 
@@ -19,6 +19,7 @@ schema is in the [notes](notes/README.md).
 | [`diff`](#diff) | Compares the project with a live database. |
 | [`publish`](#publish) | Writes, and optionally runs, the script that updates a database. |
 | [`document`](#document) | Writes a data dictionary and diagram of the project or a database. |
+| [`about`](#about) | Prints pgproj's version and environment, the project it finds, and its databases, for a bug report. |
 
 Every command also takes `--verbose` or `--quiet` and `--help` (see [Options every command takes](#options-every-command-takes)).
 `init`, `build`, `diff`, and `publish` take `--erd` to draw the project's tables ([Entity relationship diagram](#entity-relationship-diagram---erd)).
@@ -390,6 +391,64 @@ pgproj document --format html,markdown,json --output ./docs
 pgproj document --source-connection "Host=localhost;Database=mydb;Username=postgres;Password=postgres" --format markdown
 pgproj document --schemas billing --output ./docs/billing
 pgproj document --existing overwrite --no-fail-on-doc-errors
+```
+
+### about
+
+Prints what a bug report needs, in a form safe to paste into an issue. Run it in the folder you run the other commands in, with the same options,
+and paste its output into the report.
+
+- **pgproj:** its version (what `pgproj --version` prints), how it was installed (a .NET tool, a `.deb` or `.rpm` package, the Windows installer, an
+  archive, or a build from source), the operating system and its architecture, the .NET runtime, and whether PostgreSQL's parser (libpg_query) loads
+  on this machine. Without it pgproj can read no SQL ([troubleshooting](troubleshooting.md#unable-to-load-libpg_query)).
+- **The project:** the `pgproj.json` it finds, or that it finds none, then the project's name and version, its source folder and number of SQL files,
+  its schemas, search path, deploy scripts, what it leaves out of comparisons, and its tenants. The project is read, not built: `pgproj build`
+  checks it.
+- **The target and source databases:** where each connection string came from (the option, the environment variable, or `pgproj.json`, in the
+  order the other commands take them), and the host, port, database, and user it names. Connected to, it adds the server's PostgreSQL version,
+  whether the role is a superuser, and whether it can create temporary objects (without that, `diff` compares views, defaults, and other
+  expressions as text, which can show changes that are not there).
+
+A database it cannot reach within five seconds, or that refuses the login, is reported with the reason, and `about` still exits with 0; so does
+a project it cannot find or read. It only reads: it changes nothing in a database. No password is ever printed; host names and paths are, so
+remove them before pasting if they are private.
+
+Options:
+
+- `--project <path>` - the project to describe (default `pgproj.json`).
+- `--target-connection <connection-string>` - the target database, as `diff` and `publish` take it; otherwise `PGPROJ_TARGET_CONNECTION`, then
+  `targetConnectionString` from `pgproj.json`.
+- `--source-connection <connection-string>` - the source database, as `init` and `document` take it; otherwise `PGPROJ_SOURCE_CONNECTION`, then
+  `sourceConnectionString` from `pgproj.json`.
+
+```text
+pgproj 0.2.0+<commit>
+  Installed as: a .NET tool
+  Operating system: Ubuntu 24.04.1 LTS (X64)
+  .NET: .NET 10.0.13 (linux-x64)
+  PostgreSQL parser: loads (libpg_query, PostgreSQL 18's grammar)
+
+Project: pgproj.json
+  Name: shop (version 1.0.0)
+  Source: sql (42 SQL files)
+  Schemas: app, billing
+  Search path: public
+
+Target database: from the PGPROJ_TARGET_CONNECTION environment variable
+  localhost:5432, database shop_test, user postgres
+  Server: PostgreSQL 17.2
+  Superuser: yes; can create temporary objects: yes
+Source database: none configured
+
+No password is shown. Host names and paths are: remove them before pasting this into an issue if they are private.
+```
+
+Examples:
+
+```sh
+pgproj about
+pgproj about --project ./db/pgproj.json
+pgproj about --target-connection "Host=localhost;Database=app;Username=postgres"
 ```
 
 ## Promoting between environments

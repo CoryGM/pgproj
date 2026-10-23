@@ -1,7 +1,9 @@
 # Troubleshooting
 
 What a message means and what to do about it. Each section starts with the message as pgproj prints it. When nothing here fits, run the command again
-with `--verbose`, which writes each step it takes to standard error (passwords stay masked), and open an issue with that output.
+with `--verbose`, which writes each step it takes to standard error (passwords stay masked), and open an issue with that output and the output of
+[`pgproj about`](commands.md#about), run in the same folder with the same options: it shows the version, the environment, the project pgproj found, and
+where each connection came from.
 
 - [Installing and running](#installing-and-running)
 - [The project file](#the-project-file)

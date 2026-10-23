@@ -93,6 +93,7 @@ public sealed class ConnectionSettingsTests
             DiffCommand.Create(context),
             PublishCommand.Create(context),
             DocumentCommand.Create(context),
+            AboutCommand.Create(context),
         };
 
         foreach (var command in new[] { "init", "document" })
@@ -109,7 +110,7 @@ public sealed class ConnectionSettingsTests
             Assert.IsEmpty(root.Parse([command, "--source-connection"]).Errors, command + ": a bare option reads the variable");
         }
 
-        foreach (var command in new[] { "init", "build", "diff", "publish", "document" })
+        foreach (var command in new[] { "init", "build", "diff", "publish", "document", "about" })
         {
             Assert.IsNotEmpty(root.Parse([command, "--connection", "Host=x"]).Errors, command + ": --connection was removed, with no alias");
         }

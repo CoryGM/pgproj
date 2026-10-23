@@ -1,3 +1,64 @@
+sealed class PgProj.Engine.AboutConnection
+  PgProj.Engine.AboutConnectionStatus Status
+  System.Nullable`1[System.Boolean] CanCreateTemporaryObjects
+  System.Nullable`1[System.Boolean] IsSuperuser
+  System.Nullable`1[System.Int32] Port
+  System.String Database
+  System.String Host
+  System.String Message
+  System.String Origin
+  System.String ServerVersion
+  System.String Username
+  Void .ctor()
+enum PgProj.Engine.AboutConnectionStatus
+  Connected
+  Failed
+  NotTried
+sealed class PgProj.Engine.AboutProject
+  Boolean ExcludeGrants
+  Boolean ExcludeOwners
+  Boolean ExcludeRoleMemberships
+  Int32 SqlFileCount
+  System.Collections.Generic.IReadOnlyList`1[System.String] Schemas
+  System.Collections.Generic.IReadOnlyList`1[System.String] SearchPath
+  System.Collections.Generic.IReadOnlyList`1[System.String] TenantLines
+  System.String Name
+  System.String PostDeployScript
+  System.String PreDeployScript
+  System.String SourcePath
+  System.String Version
+  Void .ctor()
+enum PgProj.Engine.AboutProjectStatus
+  NotRequested
+  Found
+  NotFound
+  Invalid
+sealed class PgProj.Engine.AboutRequest
+  Boolean Connect
+  PgProj.Core.IProjectFileSource Files
+  System.String ProjectFilePath
+  System.String SourceConnectionOrigin
+  System.String SourceConnectionString
+  System.String TargetConnectionOrigin
+  System.String TargetConnectionString
+  System.TimeSpan ConnectTimeout
+  Void .ctor()
+sealed class PgProj.Engine.AboutResult
+  Boolean ParserLoaded
+  PgProj.Engine.AboutConnection Source
+  PgProj.Engine.AboutConnection Target
+  PgProj.Engine.AboutProject Project
+  PgProj.Engine.AboutProjectStatus ProjectStatus
+  System.String EngineVersion
+  System.String OperatingSystem
+  System.String OperatingSystemArchitecture
+  System.String ParserMessage
+  System.String ProcessArchitecture
+  System.String ProjectFilePath
+  System.String ProjectMessage
+  System.String Runtime
+  System.String RuntimeIdentifier
+  Void .ctor()
 sealed class PgProj.Engine.BuildRequest
   PgProj.Core.IProjectFileSource Files
   PgProj.Core.ProjectSettings Settings
@@ -312,6 +373,7 @@ sealed class PgProj.Engine.ParseCache
   Void .ctor()
   Void Clear()
 sealed class PgProj.Engine.PgProjEngine
+  System.Threading.Tasks.Task`1[PgProj.Engine.AboutResult] AboutAsync(PgProj.Engine.AboutRequest, System.Threading.CancellationToken)
   System.Threading.Tasks.Task`1[PgProj.Engine.BuildResult] BuildAsync(PgProj.Engine.BuildRequest, System.Threading.CancellationToken)
   System.Threading.Tasks.Task`1[PgProj.Engine.CompareResult] CompareAsync(PgProj.Engine.CompareRequest, System.Threading.CancellationToken)
   System.Threading.Tasks.Task`1[PgProj.Engine.DocumentCheckResult] CheckDocumentAsync(PgProj.Engine.DocumentCheckRequest, System.Threading.CancellationToken)

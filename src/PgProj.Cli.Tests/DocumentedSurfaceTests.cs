@@ -31,6 +31,7 @@ public sealed partial class DocumentedSurfaceTests
             ["diff"] = DiffCommand.Create(context),
             ["publish"] = PublishCommand.Create(context),
             ["document"] = DocumentCommand.Create(context),
+            ["about"] = AboutCommand.Create(context),
         };
 
         foreach (var (name, command) in commands)

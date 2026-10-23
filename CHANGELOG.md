@@ -6,6 +6,20 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-23
+
+### Commands
+
+- **`pgproj about`** prints what a bug report needs, safe to paste into an issue: pgproj's version and how it was installed, the operating system and
+  .NET runtime, whether PostgreSQL's parser loads, the project it finds, and the target and source databases with where each connection came from, the
+  server's PostgreSQL version, and whether the role is a superuser and can create temporary objects. A project it cannot find and a database it cannot
+  reach are reported, not errors; no password is printed.
+
+### Library
+
+- **`PgProjEngine.AboutAsync`** (`AboutRequest`, `AboutResult`, `AboutProject`, `AboutConnection`): the same description for a program, for a support or
+  diagnostics page.
+
 ## [0.1.0] - 2026-10-23
 
 The first release of pgproj: a PostgreSQL database's schema kept as plain SQL files in source control, built, compared with a
