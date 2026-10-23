@@ -1,0 +1,36 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="CHANGELOG.md" />
+    <File Path="CLAUDE.md" />
+    <File Path="CONTRIBUTING.md" />
+    <File Path="DEVELOPING.md" />
+    <File Path="documentation.md" />
+    <File Path="pgproj.json.md" />
+    <File Path="pgproj.sample.json" />
+    <File Path="PROJECT.md" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Samples/">
+    <File Path="samples/MultiSchema/pgproj.json" />
+    <File Path="samples/SchemaPerTenant/pgproj.json" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="src/PgProj.Cli.Tests/PgProj.Cli.Tests.csproj" Id="746687f4-6f49-4a4e-945e-66fe69b4da67" />
+    <Project Path="src/PgProj.Core.Tests/PgProj.Core.Tests.csproj" Id="1f3b2aa9-5d44-4a59-b749-99bc7aa99f50" />
+    <Project Path="src/PgProj.Dependencies.Tests/PgProj.Dependencies.Tests.csproj" Id="ef08f1a1-dbf2-4f76-8bc5-e67b1937f70a" />
+    <Project Path="src/PgProj.Integration.Tests/PgProj.Integration.Tests.csproj" Id="9a2c6e11-3f6d-4b9e-9a2b-8e1a3c7d5f60" />
+    <Project Path="src/PgProj.Deploy.Tests/PgProj.Deploy.Tests.csproj" Id="4489d2b3-6bae-4526-8a8d-dd02605b550a" />
+    <Project Path="src/PgProj.Diff.Tests/PgProj.Diff.Tests.csproj" Id="6ce48908-8a38-4825-a705-e4b19d506f46" />
+    <Project Path="src/PgProj.Engine.Tests/PgProj.Engine.Tests.csproj" Id="b3d1c5a7-2e84-4f96-8c10-6a7e9d0f4b21" />
+    <Project Path="src/PgProj.Parser.Tests/PgProj.Parser.Tests.csproj" Id="08f41d59-3090-43ac-a97e-fb5c9424771b" />
+    <Project Path="src/PgProj.Semantics.Tests/PgProj.Semantics.Tests.csproj" Id="7df700fe-f7d2-4c97-a39f-13139c9a9447" />
+  </Folder>
+  <Project Path="src/PgProj.Cli/PgProj.Cli.csproj" />
+  <Project Path="src/PgProj.Core/PgProj.Core.csproj" />
+  <Project Path="src/PgProj.Dependencies/PgProj.Dependencies.csproj" />
+  <Project Path="src/PgProj.Deploy/PgProj.Deploy.csproj" />
+  <Project Path="src/PgProj.Diff/PgProj.Diff.csproj" />
+  <Project Path="src/PgProj.Engine/PgProj.Engine.csproj" />
+  <Project Path="src/PgProj.Parser/PgProj.Parser.csproj" />
+  <Project Path="src/PgProj.Semantics/PgProj.Semantics.csproj" />
+</Solution>

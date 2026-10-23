@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest" Version="4.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PgProj.Engine\PgProj.Engine.csproj" />
+    <!-- The engine's own references are private (G-319: packed inside its package), so the tests reference what they use themselves. -->
+    <ProjectReference Include="..\PgProj.Core\PgProj.Core.csproj" />
+    <ProjectReference Include="..\PgProj.Parser\PgProj.Parser.csproj" />
+    <ProjectReference Include="..\PgProj.Semantics\PgProj.Semantics.csproj" />
+    <ProjectReference Include="..\PgProj.Dependencies\PgProj.Dependencies.csproj" />
+    <ProjectReference Include="..\PgProj.Diff\PgProj.Diff.csproj" />
+    <ProjectReference Include="..\PgProj.Deploy\PgProj.Deploy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+    <None Update="PublicApi.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,490 @@
+sealed class PgProj.Engine.BuildRequest
+  PgProj.Core.IProjectFileSource Files
+  PgProj.Core.ProjectSettings Settings
+  PgProj.Engine.ParseCache ParseCache
+  System.IProgress`1[PgProj.Engine.EngineEvent] Progress
+  System.Nullable`1[System.Boolean] ExcludeGrants
+  System.Nullable`1[System.Boolean] ExcludeOwners
+  System.Nullable`1[System.Boolean] ExcludeRoleMemberships
+  System.String ProjectFilePath
+  System.String RootDirectory
+  System.String SourceConnectionString
+  Void .ctor()
+sealed class PgProj.Engine.BuildResult
+  Int32 CurrentSchemaVersion
+  Int32 ErrorCount
+  Int32 InformationCount
+  Int32 SchemaVersion
+  Int32 WarningCount
+  Int64 ElapsedMilliseconds
+  PgProj.Engine.BuildStatus Status
+  PgProj.Engine.DatabaseEnd Source
+  PgProj.Semantics.DatabaseModel Model
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocumentInfo] Documents
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocumentInfo] TemplateDocuments
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.EngineDiagnostic] Diagnostics
+  System.Collections.Generic.IReadOnlyList`1[System.String] TenantLines
+  System.String Message
+  System.String ProjectFilePath
+  System.String ProjectName
+  System.String SourcePath
+  System.String ToJson(System.Func`2[System.String,System.String])
+  Void .ctor()
+enum PgProj.Engine.BuildStatus
+  Succeeded
+  Failed
+  ProjectNotFound
+  ProjectInvalid
+  Refused
+  ConnectionFailed
+sealed class PgProj.Engine.CompareRequest
+  PgProj.Core.IProjectFileSource Files
+  PgProj.Core.ProjectSettings Settings
+  System.Collections.Generic.IReadOnlyList`1[System.String] Tenants
+  System.Func`3[PgProj.Engine.BuildResult,System.Threading.CancellationToken,System.Threading.Tasks.Task] AfterBuild
+  System.IProgress`1[PgProj.Engine.EngineEvent] Progress
+  System.Nullable`1[System.Boolean] ExcludeGrants
+  System.Nullable`1[System.Boolean] ExcludeOwners
+  System.Nullable`1[System.Boolean] ExcludeRoleMemberships
+  System.String ProjectFilePath
+  System.String RootDirectory
+  System.String SourceConnectionString
+  System.String TargetConnectionString
+  Void .ctor()
+sealed class PgProj.Engine.CompareResult
+  Int32 AddedCount
+  Int32 CurrentSchemaVersion
+  Int32 DifferenceCount
+  Int32 ErrorCount
+  Int32 InformationCount
+  Int32 ModifiedCount
+  Int32 RemovedCount
+  Int32 SchemaVersion
+  Int32 WarningCount
+  PgProj.Diff.ChangeSet Changes
+  PgProj.Engine.CompareStatus Status
+  PgProj.Engine.DatabaseEnd Source
+  PgProj.Engine.DatabaseEnd Target
+  PgProj.Engine.TenantsComparison Tenants
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocumentInfo] Documents
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocumentInfo] TemplateDocuments
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.EngineDiagnostic] Diagnostics
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PlpgsqlBodyNote] BodyNotes
+  System.Collections.Generic.IReadOnlyList`1[System.String] UndroppedSchemas
+  System.String Message
+  System.String ProjectFilePath
+  System.String ProjectName
+  System.String SourcePath
+  System.String ToJson(System.Func`2[System.String,System.String])
+  Void .ctor()
+enum PgProj.Engine.CompareStatus
+  Succeeded
+  Failed
+  ProjectNotFound
+  ProjectInvalid
+  Refused
+  ConnectionFailed
+sealed class PgProj.Engine.DatabaseEnd
+  Int32 Port
+  System.String Database
+  System.String Host
+  Void .ctor(System.String, System.String, Int32)
+static class PgProj.Engine.DiagnosticGrouping
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.EngineDiagnostic] ForOutput(System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.EngineDiagnostic])
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Semantics.SemanticDiagnostic] ForOutput(System.Collections.Generic.IReadOnlyList`1[PgProj.Semantics.SemanticDiagnostic])
+sealed class PgProj.Engine.DocCounts
+  Int32 Columns
+  Int32 Constraints
+  Int32 Errors
+  Int32 Indexes
+  Int32 Policies
+  Int32 Routines
+  Int32 Schemas
+  Int32 Sequences
+  Int32 Tables
+  Int32 Triggers
+  Int32 Types
+  Int32 Views
+  Int32 Warnings
+  Void .ctor(Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32)
+enum PgProj.Engine.DocFormat
+  Html
+  Markdown
+  Json
+sealed class PgProj.Engine.DocProblem
+  PgProj.Engine.DocSeverity Severity
+  System.String Message
+  System.String Object
+  System.String Tag
+  Void .ctor(System.String, PgProj.Engine.DocSeverity, System.String, System.String)
+enum PgProj.Engine.DocSeverity
+  Warning
+  Error
+static class PgProj.Engine.DocTags
+  System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.Collections.Generic.IReadOnlyList`1[System.String]] AppliesTo
+  System.Collections.Generic.IReadOnlyList`1[System.String] Kinds
+  System.Collections.Generic.IReadOnlyList`1[System.String] StarterSet
+enum PgProj.Engine.DocumentCheckKind
+  None
+  Schema
+  TenantTemplate
+  DeployScript
+sealed class PgProj.Engine.DocumentCheckRequest
+  PgProj.Core.IProjectFileSource Files
+  PgProj.Core.ProjectSettings Settings
+  PgProj.Engine.ParseCache ParseCache
+  System.Nullable`1[System.Int32] Version
+  System.String DocumentPath
+  System.String ProjectFilePath
+  System.String RootDirectory
+  System.String Text
+  Void .ctor()
+sealed class PgProj.Engine.DocumentCheckResult
+  Int64 ElapsedMilliseconds
+  PgProj.Engine.DocumentCheckKind Kind
+  PgProj.Engine.DocumentCheckStatus Status
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.EngineDiagnostic] Diagnostics
+  System.Nullable`1[System.Int32] Version
+  System.String DocumentPath
+  System.String Message
+  Void .ctor()
+enum PgProj.Engine.DocumentCheckStatus
+  Succeeded
+  ProjectNotFound
+  ProjectInvalid
+  NotInProject
+sealed class PgProj.Engine.DocumentFile
+  PgProj.Engine.DocFormat Format
+  System.String FileName
+  System.String Text
+  Void .ctor(PgProj.Engine.DocFormat, System.String, System.String)
+sealed class PgProj.Engine.DocumentInfo
+  System.Nullable`1[System.Int32] Version
+  System.String Path
+  Void .ctor(System.String, System.Nullable`1[System.Int32])
+sealed class PgProj.Engine.DocumentRequest
+  PgProj.Core.IProjectFileSource Files
+  PgProj.Core.ProjectSettings Settings
+  PgProj.Engine.ErdFilter Filter
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocFormat] Formats
+  System.Func`3[PgProj.Engine.BuildResult,System.Threading.CancellationToken,System.Threading.Tasks.Task] AfterBuild
+  System.IProgress`1[PgProj.Engine.EngineEvent] Progress
+  System.Nullable`1[System.DateTime] GeneratedUtc
+  System.String ProjectFilePath
+  System.String RootDirectory
+  System.String SourceConnectionString
+  Void .ctor()
+sealed class PgProj.Engine.DocumentResult
+  Int32 CurrentSchemaVersion
+  Int32 SchemaVersion
+  PgProj.Engine.BuildResult Build
+  PgProj.Engine.DocCounts Counts
+  PgProj.Engine.DocumentStatus Status
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocProblem] Problems
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.DocumentFile] Files
+  System.DateTime GeneratedUtc
+  System.String Message
+  System.String ProjectFilePath
+  Void .ctor()
+enum PgProj.Engine.DocumentStatus
+  Succeeded
+  Failed
+  ProjectNotFound
+  ProjectInvalid
+  Refused
+  ConnectionFailed
+sealed class PgProj.Engine.EngineDiagnostic
+  PgProj.Engine.EngineDiagnostic From(PgProj.Semantics.SemanticDiagnostic)
+  PgProj.Engine.EngineSeverity Severity
+  System.Nullable`1[System.Int32] Column
+  System.Nullable`1[System.Int32] EndColumn
+  System.Nullable`1[System.Int32] EndLine
+  System.Nullable`1[System.Int32] Line
+  System.String File
+  System.String Message
+  System.String Source
+  Void .ctor(PgProj.Engine.EngineSeverity, System.String, System.String, System.Nullable`1[System.Int32], System.Nullable`1[System.Int32], System.Nullable`1[System.Int32], System.Nullable`1[System.Int32], System.String)
+sealed class PgProj.Engine.EngineEvent
+  Int64 ElapsedMilliseconds
+  PgProj.Engine.EngineEventKind Kind
+  PgProj.Engine.EngineEventLevel Level
+  PgProj.Engine.PublishNotice Notice
+  System.String Message
+  System.String Path
+  System.String Script
+  Void .ctor(PgProj.Engine.EngineEventKind, System.String, Int64, System.String, PgProj.Engine.EngineEventLevel, PgProj.Engine.PublishNotice, System.String)
+enum PgProj.Engine.EngineEventKind
+  ProjectRead
+  DocumentRead
+  ModelBuilt
+  SourceConnected
+  SourceRead
+  TargetConnected
+  LiveReadStarted
+  LiveRead
+  Compared
+  TenantStep
+  CommentsOnlyPlanned
+  Direction
+  PartPlanned
+  TenantsReadAfterShared
+  ScriptExecuted
+  AfterCommitStarted
+  AfterCommitStep
+  AfterCommitDone
+  PartPublished
+  PublishFinished
+  ScriptPlanned
+  Notice
+  DocumentationBuilt
+enum PgProj.Engine.EngineEventLevel
+  Detail
+  Information
+  Warning
+enum PgProj.Engine.EngineSeverity
+  Information
+  Warning
+  Error
+static class PgProj.Engine.ErdDiagram
+  System.String Build(PgProj.Semantics.DatabaseModel)
+  System.String Build(PgProj.Semantics.DatabaseModel, PgProj.Engine.ErdFilter)
+sealed class PgProj.Engine.ErdFilter
+  Boolean Exclude
+  Boolean IsEmpty
+  Boolean Keeps(System.String)
+  PgProj.Engine.ErdFilter None
+  System.Collections.Generic.IReadOnlyList`1[System.String] Names
+  System.Collections.Generic.IReadOnlyList`1[System.String] Schemas
+  System.String OptionName
+  Void .ctor(System.Collections.Generic.IReadOnlyList`1[System.String], Boolean)
+sealed class PgProj.Engine.ErdPlacement
+  System.String Action
+  System.String Reason
+  Void .ctor(System.String, System.String)
+sealed class PgProj.Engine.InitArgument
+  System.String Name
+  System.String Value
+  Void .ctor(System.String, System.String)
+sealed class PgProj.Engine.InitDiagramFile
+  PgProj.Engine.ErdPlacement Placement
+  System.String Path
+  Void .ctor(System.String, PgProj.Engine.ErdPlacement)
+sealed class PgProj.Engine.InitMessage
+  PgProj.Engine.EngineEventLevel Level
+  System.String Text
+  Void .ctor(PgProj.Engine.EngineEventLevel, System.String)
+sealed class PgProj.Engine.InitResult
+  Int32 CurrentSchemaVersion
+  Int32 SchemaVersion
+  PgProj.Engine.BuildResult Project
+  PgProj.Engine.InitStatus Status
+  PgProj.Engine.ScaffoldedTenants Tenants
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Core.ScaffoldedFile] Files
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Core.UnsupportedObject] UnsupportedObjects
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.InitMessage] Messages
+  System.Collections.Generic.IReadOnlyList`1[System.String] ModeledSchemas
+  System.Collections.Generic.IReadOnlyList`1[System.String] SearchPath
+  System.Collections.Generic.IReadOnlyList`1[System.String] UnreadObjectKinds
+  System.String Database
+  System.String DiagramText
+  System.String Message
+  System.String OutputDirectory
+  System.String ProjectFilePath
+  System.String ProjectFileText
+  System.String ReportFileName
+  System.String ReportText
+  System.String ServerVersion
+  System.String TenantFileName
+  System.String TenantFileText
+  Void .ctor()
+enum PgProj.Engine.InitStatus
+  Succeeded
+  Refused
+  ConnectionFailed
+sealed class PgProj.Engine.InitTenantDifference
+  Int32 Added
+  Int32 Modified
+  Int32 Removed
+  System.String Schema
+  Void .ctor(System.String, Int32, Int32, Int32)
+sealed class PgProj.Engine.ParseCache
+  Int32 Count
+  Void .ctor()
+  Void Clear()
+sealed class PgProj.Engine.PgProjEngine
+  System.Threading.Tasks.Task`1[PgProj.Engine.BuildResult] BuildAsync(PgProj.Engine.BuildRequest, System.Threading.CancellationToken)
+  System.Threading.Tasks.Task`1[PgProj.Engine.CompareResult] CompareAsync(PgProj.Engine.CompareRequest, System.Threading.CancellationToken)
+  System.Threading.Tasks.Task`1[PgProj.Engine.DocumentCheckResult] CheckDocumentAsync(PgProj.Engine.DocumentCheckRequest, System.Threading.CancellationToken)
+  System.Threading.Tasks.Task`1[PgProj.Engine.DocumentResult] DocumentAsync(PgProj.Engine.DocumentRequest, System.Threading.CancellationToken)
+  System.Threading.Tasks.Task`1[PgProj.Engine.InitResult] ScaffoldAsync(PgProj.Engine.ScaffoldRequest, System.Threading.CancellationToken)
+  System.Threading.Tasks.Task`1[PgProj.Engine.PublishResult] PublishAsync(PgProj.Engine.PublishRequest, System.Threading.CancellationToken)
+  Void .ctor()
+sealed class PgProj.Engine.PlpgsqlBodyNote
+  System.String RoutineKey
+  System.String RoutineKind
+  System.String What
+  Void .ctor(System.String, System.String, System.String)
+sealed class PgProj.Engine.PublishExecution
+  PgProj.Engine.PublishFailure Failure
+  System.Collections.Generic.IReadOnlyList`1[System.String] FailureReport
+  System.Collections.Generic.IReadOnlyList`1[System.String] NotStarted
+  System.Collections.Generic.IReadOnlyList`1[System.String] Published
+  System.String FailedPart
+  Void .ctor()
+sealed class PgProj.Engine.PublishFailure
+  Boolean AfterCommit
+  System.Collections.Generic.IReadOnlyList`1[System.String] NotDone
+  System.String Detail
+  System.String Hint
+  System.String Message
+  System.String SqlState
+  System.String Statement
+  Void .ctor(System.String, System.String, System.String, System.String, System.String, Boolean, System.Collections.Generic.IReadOnlyList`1[System.String])
+sealed class PgProj.Engine.PublishItem
+  PgProj.Engine.PublishNoticeKind Kind
+  System.Nullable`1[PgProj.Diff.ChangeNodeKind] NodeKind
+  System.String Detail
+  System.String NodeId
+  System.String Part
+  System.String Text
+  Void .ctor(PgProj.Engine.PublishNoticeKind, System.String, System.Nullable`1[PgProj.Diff.ChangeNodeKind], System.String, System.String, System.String)
+enum PgProj.Engine.PublishMode
+  Plan
+  Execute
+sealed class PgProj.Engine.PublishNotice
+  Boolean ForKeptScript
+  PgProj.Engine.PublishNoticeKind Kind
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PublishItem] Items
+  System.String Part
+  System.String Text
+  Void .ctor(PgProj.Engine.PublishNoticeKind, System.String, System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PublishItem], System.String, Boolean)
+enum PgProj.Engine.PublishNoticeKind
+  LockRewrite
+  LockLimit
+  Superuser
+  Unsupported
+  BlockedChange
+  Destructive
+  NewerThanServer
+  MissingRole
+  MissingTablespace
+  PlpgsqlBody
+  UndroppedSchema
+  NotTransactional
+  FormerTenant
+  TenantsNotRead
+  ServerNotice
+sealed class PgProj.Engine.PublishPart
+  Boolean HasStatements
+  PgProj.Diff.ChangeSet Changes
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PublishStep] AfterCommit
+  System.Collections.Generic.IReadOnlyList`1[System.String] SuperuserStatements
+  System.String Label
+  System.String Script
+  System.String TransactionalScript
+  Void .ctor()
+sealed class PgProj.Engine.PublishRequest
+  Boolean AllowDestructive
+  Boolean AllowLockLimit
+  Boolean AllowSuperuserStatements
+  Boolean CommentsOnly
+  Boolean Concurrently
+  PgProj.Core.IProjectFileSource Files
+  PgProj.Core.ProjectSettings Settings
+  PgProj.Engine.PublishMode Mode
+  System.Collections.Generic.IReadOnlyList`1[System.String] Tenants
+  System.Func`3[PgProj.Engine.BuildResult,System.Threading.CancellationToken,System.Threading.Tasks.Task] AfterBuild
+  System.Func`3[PgProj.Engine.PublishResult,System.Threading.CancellationToken,System.Threading.Tasks.Task] AfterPlan
+  System.IProgress`1[PgProj.Engine.EngineEvent] Progress
+  System.Nullable`1[System.Boolean] ExcludeGrants
+  System.Nullable`1[System.Boolean] ExcludeOwners
+  System.Nullable`1[System.Boolean] ExcludeRoleMemberships
+  System.String LockTimeout
+  System.String ProjectFilePath
+  System.String RootDirectory
+  System.String SourceConnectionString
+  System.String TargetConnectionString
+  Void .ctor()
+sealed class PgProj.Engine.PublishResult
+  Int32 CurrentSchemaVersion
+  Int32 SchemaVersion
+  PgProj.Engine.CompareResult Compare
+  PgProj.Engine.PublishExecution Execution
+  PgProj.Engine.PublishStatus Status
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PublishNotice] Refusals
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PublishNotice] Warnings
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.PublishPart] Parts
+  System.String Message
+  System.String Script
+  Void .ctor()
+enum PgProj.Engine.PublishStatus
+  Planned
+  Published
+  Failed
+  ProjectNotFound
+  ProjectInvalid
+  Refused
+  ConnectionFailed
+  ExecutionFailed
+sealed class PgProj.Engine.PublishStep
+  System.String Description
+  System.String Sql
+  Void .ctor(System.String, System.String)
+sealed class PgProj.Engine.ScaffoldRequest
+  Boolean ExcludeGrants
+  Boolean ExcludeOwners
+  Boolean ExcludeRoleMemberships
+  Boolean Report
+  Boolean TenantFile
+  PgProj.Core.IProjectFileSource Files
+  PgProj.Engine.ErdFilter Diagram
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.InitArgument] ReportArguments
+  System.Collections.Generic.IReadOnlyList`1[System.String] ExcludeSchemas
+  System.Collections.Generic.IReadOnlyList`1[System.String] IncludeSchemas
+  System.Func`3[PgProj.Engine.InitResult,System.Threading.CancellationToken,System.Threading.Tasks.Task`1[PgProj.Engine.InitDiagramFile]] AfterScaffold
+  System.IProgress`1[PgProj.Engine.EngineEvent] Progress
+  System.Nullable`1[System.DateTime] StartedUtc
+  System.String Name
+  System.String OutputDirectory
+  System.String ProjectFilePath
+  System.String SourceConnectionString
+  System.String TenantFrom
+  System.String TenantPrefix
+  System.String TenantQuery
+  Void .ctor()
+sealed class PgProj.Engine.ScaffoldedTenants
+  Int32 TemplateFileCount
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.InitTenantDifference] Differing
+  System.Collections.Generic.IReadOnlyList`1[System.String] BodiesNamingSchema
+  System.Collections.Generic.IReadOnlyList`1[System.String] LeftOut
+  System.Collections.Generic.IReadOnlyList`1[System.String] TenantSchemas
+  System.String Prefix
+  System.String TemplateSchema
+  Void .ctor(System.String, System.String, System.Collections.Generic.IReadOnlyList`1[System.String], Int32, System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.InitTenantDifference], System.Collections.Generic.IReadOnlyList`1[System.String], System.Collections.Generic.IReadOnlyList`1[System.String])
+sealed class PgProj.Engine.TenantDifference
+  PgProj.Diff.ChangeSet Changes
+  PgProj.Engine.TenantTarget Tenant
+  Void .ctor(PgProj.Engine.TenantTarget, PgProj.Diff.ChangeSet)
+sealed class PgProj.Engine.TenantGroup
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantDifference] Members
+  Void .ctor(System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantDifference])
+sealed class PgProj.Engine.TenantList
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantTarget] Tenants
+  System.Collections.Generic.IReadOnlyList`1[System.String] FormerSchemas
+  System.String Unavailable
+  Void .ctor(System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantTarget], System.Collections.Generic.IReadOnlyList`1[System.String], System.String)
+sealed class PgProj.Engine.TenantTarget
+  Boolean Exists
+  System.String Identifier
+  System.String Schema
+  Void .ctor(System.String, System.String, Boolean)
+sealed class PgProj.Engine.TenantsComparison
+  PgProj.Engine.TenantList List
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantDifference] NewTenants
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantDifference] Tenants
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantDifference] UpToDate
+  System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantGroup] Groups
+  System.Func`2[System.String,System.String] StandInDisplay(System.String, System.String)
+  System.String StandInSchema
+  System.ValueTuple`3[System.Int32,System.Int32,System.Int32] Totals
+  Void .ctor(System.String, PgProj.Engine.TenantList, System.Collections.Generic.IReadOnlyList`1[PgProj.Engine.TenantDifference])

@@ -1,0 +1,84 @@
+name: CI
+
+# Builds and tests every push to main and every pull request (G-81).
+#  - "Unit tests" run on Linux, Windows, and macOS: every src/*.Tests project except the Docker-backed one.
+#  - "Integration tests" run PgProj.Integration.Tests against PostgreSQL 14, 15, 16, 17, and 18 on Linux, where Docker is available
+#    (docs/ai/copilot-instructions.md section 9: a change to the live loader or deployment SQL must pass on every supported version; G-269).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  unit-tests:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # MinVer reads the tags
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build pgproj.slnx --configuration Release
+
+      - name: Test
+        shell: bash
+        run: |
+          for project in Parser Semantics Dependencies Diff Deploy Core Engine Cli; do
+            dotnet test "src/PgProj.$project.Tests" --configuration Release --no-build
+          done
+
+  integration-tests:
+    name: Integration tests (PostgreSQL ${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [14, 15, 16, 17, 18]
+    env:
+      PGPROJ_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}-alpine
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Docker Hub sometimes times out on the runner (a 2026-10-09 run failed every test that way), so the image is pulled here, with retries,
+      # instead of leaving the first pull to the test fixture.
+      - name: Pull the PostgreSQL image
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if docker pull "$PGPROJ_TEST_POSTGRES_IMAGE"; then exit 0; fi
+            echo "Pull attempt $attempt failed; retrying in $((attempt * 15)) seconds."
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Test
+        run: dotnet test src/PgProj.Integration.Tests --configuration Release

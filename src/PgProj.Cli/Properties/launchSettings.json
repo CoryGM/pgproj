@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "PgProj.Cli": {
+      "commandName": "Project",
+      "commandLineArgs": "build --project \"..\\..\\..\\..\\..\\src\\SQL\\pgproj.json\""
+    }
+  }
+}

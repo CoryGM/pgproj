@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- Who makes pgproj and how it is versioned (G-81), shared by the CLI and the engine's NuGet package (G-319): one git tag vX.Y.Z versions
+       both (MinVer), so a release is made by tagging; a build without a tag on it is a pre-release of the next version, from 0.1.0. -->
+  <PropertyGroup>
+    <Authors>Cory Maass</Authors>
+    <Company>Cory Maass</Company>
+    <Copyright>Copyright (c) 2026 Cory Maass</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/CoryGM/pgproj</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="8.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

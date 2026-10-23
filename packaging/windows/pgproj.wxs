@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows installer for pgproj (G-81). Built by packaging/windows/build-packages.ps1 with WiX 5:
+    wix build -arch <x64|arm64> -d Version=<major.minor.patch> -d PublishDir=<self-contained publish output> pgproj.wxs
+  A per-machine install into Program Files, with the folder added to the system PATH; an installed version is upgraded in place.
+  The UpgradeCode below identifies the product across versions and must never change.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="pgproj" Manufacturer="Cory Maass" Version="$(Version)" UpgradeCode="D49246CF-ECD6-4034-BE35-D51C77DFA569" Scope="perMachine" InstallerVersion="500">
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of pgproj is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/CoryGM/pgproj" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="pgproj" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Application" Directory="INSTALLFOLDER">
+      <Files Include="$(PublishDir)\**" />
+      <Component Id="PathEntry" Guid="69BF20A9-549B-4681-839D-F3296E2D86FE">
+        <Environment Id="PgProjPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="yes" Permanent="no" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="pgproj" Level="1">
+      <ComponentGroupRef Id="Application" />
+    </Feature>
+  </Package>
+</Wix>

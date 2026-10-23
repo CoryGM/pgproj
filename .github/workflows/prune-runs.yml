@@ -1,0 +1,41 @@
+name: Prune workflow runs
+
+# Keeps the 10 most recent completed runs of each workflow and deletes the older ones, with their logs and artifacts (the user's request of 2026-10-13).
+# GitHub has no "keep the last N runs" setting; retention (Settings, Actions) only expires logs and artifacts, so the run list would grow for ever.
+# A run that is queued or in progress is never touched. Deleting a run also deletes the files a manual Release dry run kept as artifacts.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # every Monday at 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: prune-runs
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+
+jobs:
+  prune:
+    name: Keep the last 10 runs per workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete older runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          KEEP: 10
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/actions/workflows?per_page=100" --jq '.workflows[] | "\(.id)\t\(.name)"' |
+          while IFS=$'\t' read -r id name; do
+            # Newest first; everything after the first $KEEP is deleted.
+            old=$(gh api --paginate "repos/$REPO/actions/workflows/$id/runs?status=completed&per_page=100" --jq '.workflow_runs[].id' | tail -n +$((KEEP + 1)))
+            count=$(printf '%s' "$old" | grep -c . || true)
+            echo "$name: deleting $count run(s)"
+            for run in $old; do
+              gh api -X DELETE "repos/$REPO/actions/runs/$run" > /dev/null
+            done
+          done

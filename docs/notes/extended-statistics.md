@@ -1,0 +1,7 @@
+# Extended statistics
+
+Extended statistics: `CREATE STATISTICS name [(ndistinct, dependencies, mcv)] ON column-or-expression, ... FROM table` (columns and, on PostgreSQL 14 and later, expressions) is created after its table and dropped before it, whatever order the files are in, and read back from `pg_statistic_ext` (the server's own `pg_get_statisticsobjdef`). The kinds are compared as a set and no kinds written means all three, the columns as a set (PostgreSQL stores them in the table's column order), and each expression in a canonical form, so `(lower(c))` and `(LOWER((c)))` are one expression. There is no `ALTER` for any of it, so a change is a drop and a create, and removing one is not a destructive change: the next `ANALYZE` collects the statistics again. Dropping a column that statistics use drops them in PostgreSQL, so remove them from the project in the same publish. `init` writes each one in its table's file, after the table. The statistics PostgreSQL's extensions own, and statistics on a table an extension owns, are left alone; when `schemas` is set, only the statistics in one of those schemas are managed. A statistics object's owner (`ALTER STATISTICS ... OWNER TO`) and comment (`COMMENT ON STATISTICS`) are modeled and written by `init` beside it in the table's file; `ALTER STATISTICS ... SET STATISTICS` is warned about and ignored.
+
+---
+
+[All notes](README.md) · [Commands](../commands.md) · [README](../../README.md)

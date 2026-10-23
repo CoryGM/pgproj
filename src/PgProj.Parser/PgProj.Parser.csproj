@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    libpg_query, PostgreSQL 18's grammar (G-120). Only the package's native library is used: PgQueryInterop calls it directly, so
+    the managed Npgquery assembly and its dependencies are not referenced (ExcludeAssets) and do not flow to consumers (PrivateAssets).
+    The libraries are copied to the output of this project and of every project that references it, under runtimes/<rid>/native, where
+    PgQueryInterop looks for them, named as the platform names them: libpg_query.dll, libpg_query.so, libpg_query.dylib (G-81). The
+    package has no osx-x64 library, so an Intel Mac is not supported.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Npgquery" Version="1.2.0" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all">
+      <IncludeAssets>none</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(PkgNpgquery)/runtimes/win-x64/native/pg_query.dll" Link="runtimes/win-x64/native/libpg_query.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(PkgNpgquery)/runtimes/win-x64/native/pg_query.dll')" />
+    <None Include="$(PkgNpgquery)/runtimes/win-arm64/native/pg_query.dll" Link="runtimes/win-arm64/native/libpg_query.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(PkgNpgquery)/runtimes/win-arm64/native/pg_query.dll')" />
+    <None Include="$(PkgNpgquery)/runtimes/linux-x64/native/libpg_query.so" Link="runtimes/linux-x64/native/libpg_query.so" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(PkgNpgquery)/runtimes/linux-x64/native/libpg_query.so')" />
+    <None Include="$(PkgNpgquery)/runtimes/linux-arm64/native/libpg_query.so" Link="runtimes/linux-arm64/native/libpg_query.so" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(PkgNpgquery)/runtimes/linux-arm64/native/libpg_query.so')" />
+    <None Include="$(PkgNpgquery)/runtimes/osx-arm64/native/libpg_query.dylib" Link="runtimes/osx-arm64/native/libpg_query.dylib" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(PkgNpgquery)/runtimes/osx-arm64/native/libpg_query.dylib')" />
+  </ItemGroup>
+
+</Project>

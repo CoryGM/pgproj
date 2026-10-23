@@ -1,0 +1,47 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>pgproj</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>pgproj</ToolCommandName>
+  </PropertyGroup>
+
+  <!-- Identity and version (G-81): Identity.props, shared with the engine's package (G-319). -->
+  <Import Project="..\Identity.props" />
+
+  <PropertyGroup>
+    <Product>pgproj</Product>
+    <Description>PostgreSQL database project compiler: builds a schema from SQL files, compares it with a live database, and publishes the difference.</Description>
+    <!-- The tool's messages are English; System.CommandLine's translations would add a folder per language to every release. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PgProj.Core\PgProj.Core.csproj" />
+    <ProjectReference Include="..\PgProj.Parser\PgProj.Parser.csproj" />
+    <ProjectReference Include="..\PgProj.Semantics\PgProj.Semantics.csproj" />
+    <ProjectReference Include="..\PgProj.Dependencies\PgProj.Dependencies.csproj" />
+    <ProjectReference Include="..\PgProj.Diff\PgProj.Diff.csproj" />
+    <ProjectReference Include="..\PgProj.Deploy\PgProj.Deploy.csproj" />
+    <ProjectReference Include="..\PgProj.Engine\PgProj.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="System.CommandLine" Version="2.0.13" />
+  </ItemGroup>
+
+  <!-- A build carries libpg_query for every platform (PgProj.Parser), so one build runs anywhere. A publish for a runtime
+       identifier keeps only that runtime's library, so a release archive holds no other platform's binaries. -->
+  <Target Name="KeepOnlyThisRuntimesNativeLibrary" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <OtherRuntimeFile Include="@(ResolvedFileToPublish)" Condition="$([System.String]::new('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/')) and !$([System.String]::new('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/$(RuntimeIdentifier)/'))" />
+      <ResolvedFileToPublish Remove="@(OtherRuntimeFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

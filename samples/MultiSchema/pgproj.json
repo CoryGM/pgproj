@@ -1,0 +1,8 @@
+{
+  "name": "PostgreSQL Project Sample",
+  "version": "1.0",
+  "schemas": [],
+  "source": "./",
+  "postdeploy": "./Scripts/postdeploy.sql",
+  "targetConnectionString": "Host=localhost;Port=5432;Database=pgproj;Username=postgres;Password=*****"
+}

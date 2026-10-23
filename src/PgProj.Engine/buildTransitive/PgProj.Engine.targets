@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    PgProj.Engine (G-319) parses SQL with libpg_query, which it carries for win-x64, win-arm64, linux-x64, linux-arm64, and osx-arm64 only. A build or
+    publish for another runtime (an Intel Mac, 32-bit Windows, a musl Linux such as Alpine, whose runtime would take the glibc linux library and fail to
+    load it) fails here, with the reason, rather than when the program first parses. A build for no runtime in particular carries all five libraries and
+    runs on any of the five.
+  -->
+  <Target Name="PgProjEngineCheckRuntime" BeforeTargets="BeforeBuild" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <_PgProjEngineRuntimes>;win-x64;win-arm64;linux-x64;linux-arm64;osx-arm64;</_PgProjEngineRuntimes>
+    </PropertyGroup>
+    <Error
+      Condition="!$(_PgProjEngineRuntimes.Contains(';$(RuntimeIdentifier);'))"
+      Code="PGPROJ001"
+      Text="PgProj.Engine runs on win-x64, win-arm64, linux-x64, linux-arm64, and osx-arm64, the platforms its PostgreSQL parser (libpg_query) is built for; this project builds for $(RuntimeIdentifier)." />
+  </Target>
+
+</Project>

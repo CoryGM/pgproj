@@ -1,0 +1,14 @@
+{
+  "name": "storefront",
+  "version": "1.0",
+  "source": "./sql",
+  "targetConnectionString": "Host=localhost;Port=5432;Database=storefront;Username=postgres;Password=<password>",
+  "searchPath": ["platform", "public"],
+  "postdeploy": "./scripts/post.sql",
+  "tenants": {
+    "template": "./sql/Tenant",
+    "prefix": "shop",
+    "file": "./tenants.csv",
+    "postdeploy": "./scripts/tenant/post.sql"
+  }
+}

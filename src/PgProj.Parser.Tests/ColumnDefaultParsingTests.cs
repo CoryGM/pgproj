@@ -1,0 +1,165 @@
+namespace PgProj.Parser.Tests;
+
+/// <summary>
+/// G-56: a column DEFAULT was never captured (pg_query puts it in the column's constraints list, which the parser
+/// did not read), so it was not deployed and a changed default was not diffed. The expression is now read verbatim.
+/// </summary>
+[TestClass]
+public sealed class ColumnDefaultParsingTests
+{
+    [TestMethod]
+    [DataRow("integer default 0", "0")]
+    [DataRow("integer DEFAULT -1", "-1")]
+    [DataRow("numeric(10,2) default 1.50", "1.50")]
+    [DataRow("text default 'pending'", "'pending'")]
+    [DataRow("text default 'it''s, (fine)'", "'it''s, (fine)'")]
+    [DataRow("text default E'a\\'b, c'", "E'a\\'b, c'")]
+    [DataRow("text default $$a, b$$", "$$a, b$$")]
+    [DataRow("text default $tag$x)y$tag$", "$tag$x)y$tag$")]
+    [DataRow("text default 'x'::text", "'x'::text")]
+    [DataRow("boolean default true", "true")]
+    [DataRow("timestamptz default now()", "now()")]
+    [DataRow("timestamptz default CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP")]
+    [DataRow("uuid default gen_random_uuid()", "gen_random_uuid()")]
+    [DataRow("text default coalesce(current_setting('app.x', true), 'none')", "coalesce(current_setting('app.x', true), 'none')")]
+    [DataRow("integer default (1 + 2) * 3", "(1 + 2) * 3")]
+    [DataRow("integer[] default ARRAY[1, 2, 3]", "ARRAY[1, 2, 3]")]
+    [DataRow("text[] default '{}'::text[]", "'{}'::text[]")]
+    [DataRow("text default case when true then 'a' else 'b' end", "case when true then 'a' else 'b' end")]
+    [DataRow("integer default null", "null")]
+    [DataRow("interval default interval '1 day'", "interval '1 day'")]
+    [DataRow("integer default nextval('public.seq'::regclass)", "nextval('public.seq'::regclass)")]
+    public void DefaultExpressionIsReadVerbatim(string columnDefinition, string expected)
+    {
+        var column = ParseColumn($"create table public.t (id integer, c {columnDefinition});", "c");
+
+        Assert.AreEqual(expected, column.RawDefaultExpression);
+    }
+
+    [TestMethod]
+    [DataRow("integer default 0 not null", "0")]
+    [DataRow("integer not null default 0", "0")]
+    [DataRow("integer default 0 null", "0")]
+    [DataRow("text default 'x' collate \"C\"", "'x'")]
+    [DataRow("integer default 0 constraint c_pos check (c > 0)", "0")]
+    [DataRow("integer default 0 primary key", "0")]
+    [DataRow("integer default 0 unique", "0")]
+    [DataRow("integer default 0 references public.o (id)", "0")]
+    [DataRow("text default lower('A') not null", "lower('A')")]
+    [DataRow("integer default 0 -- trailing comment\n", "0")]
+    [DataRow("integer default 0 /* block */ not null", "0")]
+    public void DefaultExpressionEndsAtTheNextColumnClause(string columnDefinition, string expected)
+    {
+        var column = ParseColumn($"create table public.t (c {columnDefinition});", "c");
+
+        Assert.AreEqual(expected, column.RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void DefaultOfTheRightColumnIsReadWhenSeveralColumnsHaveOne()
+    {
+        const string sql = "create table public.t (a integer default 1, b text default 'two', c boolean not null default false, d integer);";
+
+        Assert.AreEqual("1", ParseColumn(sql, "a").RawDefaultExpression);
+        Assert.AreEqual("'two'", ParseColumn(sql, "b").RawDefaultExpression);
+        Assert.AreEqual("false", ParseColumn(sql, "c").RawDefaultExpression);
+        Assert.IsNull(ParseColumn(sql, "d").RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void QuotedTableAndColumnNamesAreMatched()
+    {
+        const string sql = "CREATE TABLE \"my schema\".\"t (x)\" (\n\"Order\" integer DEFAULT 5 NOT NULL,\norder_id integer DEFAULT 6\n);";
+
+        Assert.AreEqual("5", ParseColumn(sql, "Order").RawDefaultExpression);
+        Assert.AreEqual("6", ParseColumn(sql, "order_id").RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void DefaultIsReadFromTheRightStatementInAFileWithSeveralTables()
+    {
+        const string sql = "create table public.a (c integer default 1); create table public.b (c integer default 2);";
+        var tables = new PgQueryParser().Parse(sql).Nodes.OfType<TableNode>().ToDictionary(static table => table.Name!);
+
+        Assert.AreEqual("1", tables["a"].Columns.Single().RawDefaultExpression);
+        Assert.AreEqual("2", tables["b"].Columns.Single().RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void MultiLineDefaultWithACommentAboveTheColumnIsRead()
+    {
+        const string sql = "create table public.t (\n    -- the counter\n    c integer\n        default (\n            1 + 1\n        ) -- trailing\n        not null,\n    d integer\n);";
+
+        Assert.AreEqual("(\n            1 + 1\n        )", ParseColumn(sql, "c").RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void ByDefaultIdentityIsNotADefaultExpression()
+    {
+        var column = ParseColumn("create table public.t (c integer generated by default as identity);", "c");
+
+        Assert.IsNull(column.RawDefaultExpression);
+        Assert.AreEqual("BY DEFAULT", column.IdentityGeneration);
+    }
+
+    [TestMethod]
+    public void SetDefaultReferentialActionIsNotADefaultExpression()
+    {
+        var column = ParseColumn("create table public.t (c integer references public.o (id) on delete set default);", "c");
+
+        Assert.IsNull(column.RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void GeneratedColumnAndColumnWithoutDefaultHaveNoDefaultExpression()
+    {
+        const string sql = "create table public.t (a integer, b integer generated always as (a * 2) stored, c integer);";
+
+        Assert.IsNull(ParseColumn(sql, "b").RawDefaultExpression);
+        Assert.IsNull(ParseColumn(sql, "c").RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void TableConstraintsAndDefaultsInTheSameBodyDoNotInterfere()
+    {
+        const string sql = "create table public.t (a integer default 1, b integer, constraint t_ab check (a > 0 and b < 9), primary key (a));";
+
+        Assert.AreEqual("1", ParseColumn(sql, "a").RawDefaultExpression);
+        Assert.IsNull(ParseColumn(sql, "b").RawDefaultExpression);
+    }
+
+    [TestMethod]
+    public void SerialColumnKeepsItsSynthesizedDefault()
+    {
+        var column = ParseColumn("create table public.orders (id serial primary key);", "id");
+
+        Assert.AreEqual("nextval('public.orders_id_seq'::regclass)", column.RawDefaultExpression);
+    }
+
+    [TestMethod]
+    [DataRow("text[] default '{}'::text[]", "TypeCast")]
+    [DataRow("numeric default 0::numeric", "TypeCast")]
+    [DataRow("timestamptz default now()", "FuncCall")]
+    [DataRow("integer default 0", "A_Const")]
+    public void TheDefaultsTreeIsKept(string columnDefinition, string expectedRootNode)
+    {
+        // G-102: the semantic layer reads what a default refers to from this tree, not from the text.
+        var column = ParseColumn($"create table public.t (id integer, c {columnDefinition});", "c");
+
+        Assert.IsNotNull(column.DefaultExpressionAst);
+        StringAssert.StartsWith(column.DefaultExpressionAst, $"{{\"{expectedRootNode}\"");
+    }
+
+    [TestMethod]
+    public void AColumnWithoutAWrittenDefaultHasNoDefaultTree()
+    {
+        var sql = "create table public.t (a integer, b serial, c integer generated always as (a * 2) stored);";
+
+        Assert.IsNull(ParseColumn(sql, "a").DefaultExpressionAst);
+        Assert.IsNull(ParseColumn(sql, "b").DefaultExpressionAst, "A serial column's nextval() default is synthesized, not written.");
+        Assert.IsNull(ParseColumn(sql, "c").DefaultExpressionAst, "A generated column's expression is not a default.");
+    }
+
+    private static ColumnNode ParseColumn(string sql, string columnName)
+        => new PgQueryParser().Parse(sql).Nodes.OfType<TableNode>().Single().Columns.Single(column => column.Name == columnName);
+}

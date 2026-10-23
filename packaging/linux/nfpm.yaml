@@ -1,0 +1,48 @@
+# nfpm configuration for the pgproj .deb and .rpm packages (G-81).
+# Environment: VERSION (semantic version, no leading v), ARCH (amd64 or arm64). Run from a directory holding pgproj-stage/, the
+# self-contained publish output (packaging/linux/build-packages.sh does this).
+# Build: nfpm package --config packaging/linux/nfpm.yaml --packager deb|rpm --target <dir>
+name: pgproj
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: database
+priority: optional
+maintainer: Cory Maass <1860202+CoryGM@users.noreply.github.com>
+description: |
+  PostgreSQL database project compiler.
+  Builds a schema from SQL files, compares it with a live PostgreSQL database, and publishes the difference.
+homepage: https://github.com/CoryGM/pgproj
+license: Apache-2.0
+
+contents:
+  # The application is self-contained (it carries its own .NET runtime) and lives in one directory.
+  - src: ./pgproj-stage
+    dst: /usr/lib/pgproj
+    type: tree
+  - src: /usr/lib/pgproj/pgproj
+    dst: /usr/bin/pgproj
+    type: symlink
+
+# What a self-contained .NET application needs from the system: the C++ runtime, OpenSSL (TLS to PostgreSQL), ICU (culture data), and Kerberos
+# (GSSAPI, which PostgreSQL connections use; without it .NET prints 'Cannot load library libgssapi_krb5.so.2', G-324). .NET lists the same.
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libgcc-s1
+      - libstdc++6
+      - zlib1g
+      - libssl3 | libssl3t64
+      - libicu78 | libicu76 | libicu74 | libicu72 | libicu70
+      - libgssapi-krb5-2
+  rpm:
+    depends:
+      - glibc
+      - libgcc
+      - libstdc++
+      - zlib
+      - openssl-libs
+      - libicu
+      - krb5-libs

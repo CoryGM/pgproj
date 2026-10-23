@@ -1,0 +1,6 @@
+root = true
+
+# C# source is LF on every platform (G-145; see .gitattributes). Tests put SQL in raw-string literals and
+# edit it with text that contains \n, so a file saved with CRLF changes what those tests do.
+[*.cs]
+end_of_line = lf
