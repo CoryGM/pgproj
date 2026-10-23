@@ -34,7 +34,8 @@ pgproj runs on Apple silicon only; there is no Intel (x64) Mac build.
 ```
 
 pgproj parses SQL with PostgreSQL's own parser, a native library it carries for Windows (x64, Arm64), Linux (x64, Arm64, glibc), and macOS (Apple
-silicon). On another platform (an Intel Mac, 32-bit Windows, a musl Linux such as Alpine) the library is not there, and every file reports this error.
+silicon). On another platform (an Intel Mac, 32-bit Windows, a musl Linux such as Alpine) the library is not there, and every file reports this error;
+the .NET tool (`dotnet tool install --global pgproj`) installs on such a platform, and then reports it too.
 Run pgproj on a supported platform, or in a Debian or Ubuntu based container on one that is not. A .NET program that uses the
 [`PgProj.Engine` package](library.md#referencing-it) and builds for an unsupported runtime (`-r osx-x64`, `-r linux-musl-x64`) gets error `PGPROJ001`
 at build time instead; built for no runtime in particular, it gets this error when it runs on one.

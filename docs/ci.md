@@ -39,6 +39,9 @@ steps:
 On an Arm64 runner use `linux-arm64`; on a Windows runner download the `win-x64.zip`. GitHub's Ubuntu runners have what pgproj needs (OpenSSL 3,
 ICU); a minimal container image needs ICU and OpenSSL 3 installed ([troubleshooting](troubleshooting.md#installing-and-running)).
 
+A job that has .NET 10 already (it ran `actions/setup-dotnet`) can install the .NET tool instead:
+`dotnet tool install --global pgproj --version "$PGPROJ_VERSION"`.
+
 ## Check every pull request
 
 Build the project, deploy it to an empty PostgreSQL started for the job, and check that the database then matches the project. This catches a syntax

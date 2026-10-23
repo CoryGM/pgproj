@@ -9,7 +9,8 @@ name: Release
 # uses it (packaging/nuget/verify-package.sh), attached to the release, and pushed to nuget.org last, with Trusted Publishing: nuget.org trusts
 # this workflow file of this repository (a policy on the CoryGM account), so no API key is stored here. The push runs only when the repository
 # variable NUGET_PUBLISH is "true" (Settings > Secrets and variables > Actions > Variables), set once the policy exists; without it a tag makes
-# the GitHub Release and skips nuget.org.
+# the GitHub Release and skips nuget.org. The CLI as a .NET tool, the package pgproj (G-323; dotnet tool install -g pgproj), is packed, verified
+# (packaging/nuget/verify-tool.sh: installed with dotnet tool install and smoke-tested), attached, and pushed beside it, the same way.
 #
 # The Linux packages are signed (G-331): the .rpm files, the release's SHA256SUMS.txt (SHA256SUMS.txt.asc), and the signed apt and dnf
 # repositories that a tag publishes to GitHub Pages (https://corygm.github.io/pgproj, packaging/linux/build-repository.sh). Without the key a
@@ -277,7 +278,7 @@ jobs:
           if-no-files-found: error
 
   nuget:
-    name: NuGet package (pack)
+    name: NuGet packages (pack)
     needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -296,6 +297,11 @@ jobs:
           test -f "nupkg/PgProj.Engine.${{ needs.version.outputs.version }}.nupkg"
           test -f "nupkg/PgProj.Engine.${{ needs.version.outputs.version }}.snupkg"
 
+      - name: Pack the .NET tool pgproj
+        run: |
+          dotnet pack src/PgProj.Cli/PgProj.Cli.csproj -c Release -o nupkg
+          test -f "nupkg/pgproj.${{ needs.version.outputs.version }}.nupkg"
+
       - uses: actions/upload-artifact@v7
         with:
           name: nuget
@@ -303,7 +309,7 @@ jobs:
           if-no-files-found: error
 
   nuget-verify:
-    name: NuGet package (${{ matrix.os }})
+    name: NuGet packages (${{ matrix.os }})
     needs: [version, nuget]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -326,6 +332,10 @@ jobs:
       - name: Build, publish, and run a program that uses the package
         shell: bash
         run: packaging/nuget/verify-package.sh nupkg "${{ needs.version.outputs.version }}"
+
+      - name: Install and run the .NET tool
+        shell: bash
+        run: packaging/nuget/verify-tool.sh nupkg "${{ needs.version.outputs.version }}"
 
   release:
     name: GitHub Release
@@ -417,6 +427,9 @@ jobs:
 
       - name: Push PgProj.Engine and its symbols
         run: dotnet nuget push "nupkg/PgProj.Engine.${{ needs.version.outputs.version }}.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Push the .NET tool pgproj
+        run: dotnet nuget push "nupkg/pgproj.${{ needs.version.outputs.version }}.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   repository:
     name: Publish the apt and dnf repositories

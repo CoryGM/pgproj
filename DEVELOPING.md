@@ -279,7 +279,9 @@ version, for example `0.1.0-preview.0.181`; `pgproj --version` prints it (System
    Signing). It also packs the engine's NuGet
    package, `PgProj.Engine` (G-319), verifies it on Linux, Windows, and macOS with a program that uses it (`packaging/nuget/verify-package.sh`), attaches the
    `.nupkg` and `.snupkg` to the release, and pushes them to nuget.org last (job `nuget-publish`), only when the repository variable `NUGET_PUBLISH` is `true`
-   (set once the Trusted Publishing policy exists; without it the release is made and nuget.org is skipped). Running the workflow by hand (Actions, Run workflow) is a dry
+   (set once the Trusted Publishing policy exists; without it the release is made and nuget.org is skipped). The CLI as a .NET tool, the package
+   `pgproj` (G-323), goes the same way beside it: packed, installed with `dotnet tool install` and smoke-tested on Linux, Windows, and macOS
+   (`packaging/nuget/verify-tool.sh`), attached, and pushed. Running the workflow by hand (Actions, Run workflow) is a dry
    run: it builds and verifies everything, the package included, and keeps the files as workflow artifacts; nothing is published.
 
 **The NuGet package.** One package, `PgProj.Engine`: the engine and the six assemblies it is built on (its project references are `PrivateAssets="all"` and
@@ -288,7 +290,13 @@ packed into `lib/net10.0` by the `PackInnerAssemblies` target; their `.pdb` file
 (`PGPROJ001`). `PackageRuntimesTests` checks that the parser's libraries, the package's, the build check, and the package readme name the same runtimes. It is
 pushed with nuget.org's **Trusted Publishing**: the policy on the `CoryGM` nuget.org account trusts `release.yml` of `CoryGM/pgproj`, and the job exchanges
 GitHub's OIDC token for a one-hour key (`NuGet/login`), so no API key is stored. The package is not author-signed; nuget.org signs every package it publishes.
-A project that references the engine's project (the tests, the CLI) references the inner projects it uses itself. Every public member of the engine has an XML comment, which the package carries for IntelliSense: a public member without one fails the build (CS1591 is an error in `PgProj.Engine.csproj`).
+A project that references the engine's project (the tests, the CLI) references the inner projects it uses itself.
+
+**The .NET tool.** `pgproj` (`dotnet tool install --global pgproj`) is `src/PgProj.Cli` packed with `PackAsTool` (its readme is `src/PgProj.Cli/README.md`):
+framework-dependent, so it needs the .NET 10 runtime, with every assembly it uses and `libpg_query` for the five runtimes under
+`tools/net10.0/any/runtimes/<rid>/native` (a build without a runtime identifier keeps them all). It is pushed by the same Trusted Publishing policy, whose
+scope must allow the package `pgproj` as well as `PgProj.*`. On a platform without a library (an Intel Mac, a musl Linux) it installs, and every file
+reports `Unable to load libpg_query` (`docs/troubleshooting.md`). Every public member of the engine has an XML comment, which the package carries for IntelliSense: a public member without one fails the build (CS1591 is an error in `PgProj.Engine.csproj`).
 
 `CI` (`.github/workflows/ci.yml`) builds and runs the unit tests on Linux, Windows, and macOS, and the Docker integration suite on
 PostgreSQL 14, 15, 16, 17, and 18, for every push to `main` and every pull request.
@@ -309,6 +317,8 @@ packaging/publish-unix.sh osx-arm64 0.1.0 dist              # run on a Mac: it s
 packaging/smoke-test.sh path/to/pgproj 0.1.0                # starts pgproj and builds packaging/smoke
 dotnet pack src/PgProj.Engine/PgProj.Engine.csproj -c Release -o nupkg
 packaging/nuget/verify-package.sh nupkg 0.1.0               # the package's contents; a program using it built, published, and run
+dotnet pack src/PgProj.Cli/PgProj.Cli.csproj -c Release -o nupkg
+packaging/nuget/verify-tool.sh nupkg 0.1.0                  # the tool's contents; installed with dotnet tool install, and smoke-tested
 ```
 
 ```powershell
