@@ -274,7 +274,9 @@ version, for example `0.1.0-preview.0.181`; `pgproj --version` prints it (System
 2. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. A tag with a suffix (`v0.2.0-rc.1`) is published as a pre-release; when `CHANGELOG.md`
    has no section for it, its notes are the `[Unreleased]` section (`packaging/release-notes.sh`), so step 1 waits for the final version.
 3. The `Release` workflow (`.github/workflows/release.yml`) builds Linux, then Windows, then macOS, installs and runs every package,
-   and creates the GitHub Release with the archives, `.deb`, `.rpm`, `.msi`, `SHA256SUMS.txt`, and a CycloneDX SBOM. It also packs the engine's NuGet
+   and creates the GitHub Release with the archives, `.deb`, `.rpm` (signed), `.msi`, `SHA256SUMS.txt` and its signature, the Linux signing key, and a
+   CycloneDX SBOM. Then it rebuilds the signed apt and dnf repositories from the releases and publishes them to GitHub Pages (job `repository`, below,
+   Signing). It also packs the engine's NuGet
    package, `PgProj.Engine` (G-319), verifies it on Linux, Windows, and macOS with a program that uses it (`packaging/nuget/verify-package.sh`), attaches the
    `.nupkg` and `.snupkg` to the release, and pushes them to nuget.org last (job `nuget-publish`), only when the repository variable `NUGET_PUBLISH` is `true`
    (set once the Trusted Publishing policy exists; without it the release is made and nuget.org is skipped). Running the workflow by hand (Actions, Run workflow) is a dry
@@ -299,6 +301,10 @@ the older ones with their logs and artifacts (including the files a `Release` dr
 ```sh
 packaging/linux/build-packages.sh linux-x64 0.1.0 dist      # .tar.gz, .deb, .rpm (nfpm, or Docker for its image)
 packaging/linux/verify-packages.sh dist 0.1.0 linux-x64     # installs each in a clean container, runs it, and connects it to a PostgreSQL it starts (Docker)
+packaging/linux/signing-key.sh signing                      # the key from LINUX_SIGNING_KEY, or else a throwaway one (Docker)
+packaging/linux/sign-rpms.sh dist signing                   # signs and checks the .rpm files
+packaging/linux/build-repository.sh site signing stable/ testing/   # the apt and dnf repositories from two folders of packages
+packaging/linux/verify-repository.sh site stable 0.1.0 linux-x64   # installs from them with apt and dnf in clean containers
 packaging/publish-unix.sh osx-arm64 0.1.0 dist              # run on a Mac: it signs ad hoc with codesign
 packaging/smoke-test.sh path/to/pgproj 0.1.0                # starts pgproj and builds packaging/smoke
 dotnet pack src/PgProj.Engine/PgProj.Engine.csproj -c Release -o nupkg
@@ -319,13 +325,35 @@ Build the Linux packages on Linux (a Windows file system loses the executable bi
   not been run against a real certificate yet.
 - *macOS:* the files are ad-hoc signed only (Apple silicon will not run an unsigned executable). They are not signed with a Developer
   ID and not notarized (no Apple Developer account), so a browser download is quarantined (`README.md`, Installing).
-- *Linux:* the packages are not GPG-signed.
+- *Linux* (G-331): one OpenPGP key, `packaging/linux/pgproj-signing-key.asc` (the public half; the fingerprint is checked against the secret), signs the
+  `.rpm` files, `SHA256SUMS.txt` (`SHA256SUMS.txt.asc`, which covers every file of a release), and the apt and dnf repositories' metadata. The `.deb` files
+  are not signed themselves: apt checks the repository they come from. The job `linux-signing` signs the `.rpm` files and, with the release key, replaces
+  the unsigned ones in the build's artifacts; it also builds the repositories from that build and installs from them with apt (Debian 12, Ubuntu 24.04)
+  and dnf (Fedora) on amd64 and arm64. Without the secrets `LINUX_SIGNING_KEY` and `LINUX_SIGNING_PASSPHRASE` it does all of that with a throwaway key,
+  and nothing is released signed or published.
+  - *The repositories* (job `repository`, on a tag): GitHub Pages serves `https://corygm.github.io/pgproj` (Settings, Pages, Source: GitHub Actions; the
+    `github-pages` environment allows tags `v*`). Each tag rebuilds the whole site from the GitHub Releases (`packaging/linux/collect-releases.sh`):
+    `stable` holds the three newest releases, and `testing` the newest pre-release when it is newer than the newest release, or else the newest release.
+    Pages serves at most 1 GB, and a version's four packages are about 160 MB. An older `.rpm` that was released unsigned is signed as it goes in.
+  - *Making the key* (once, on a trusted machine; Git for Windows includes `gpg`):
+
+    ```sh
+    gpg --quick-generate-key "pgproj release signing <1860202+CoryGM@users.noreply.github.com>" rsa4096 sign 2y
+    gpg --list-secret-keys --keyid-format long                                   # the fingerprint
+    gpg --armor --export <fingerprint> > packaging/linux/pgproj-signing-key.asc  # commit this
+    gpg --armor --export-secret-keys <fingerprint> | gh secret set LINUX_SIGNING_KEY -R CoryGM/pgproj
+    gh secret set LINUX_SIGNING_PASSPHRASE -R CoryGM/pgproj                      # asks for the passphrase
+    ```
+
+    Keep a backup of the secret key offline. Before it expires, extend it (`gpg --quick-set-expire <fingerprint> 2y`), export the public key again, and
+    update both the file and the secret: users import the key again from `pgproj.asc`.
 
 **Provenance.** The workflow attests build provenance (`gh attestation verify`) when the repository is public; the step is skipped while
 it is private, because attestations for private repositories need a plan this project does not have.
 
 **Tools.** MinVer (versions), nfpm (`.deb`, `.rpm`; container image `ghcr.io/goreleaser/nfpm`), WiX 5.0.2 (MSI), CycloneDX (SBOM), `NuGet/login` (Trusted
-Publishing). WiX 6
+Publishing), GnuPG, `rpmsign` and `createrepo_c` (in a Fedora container) and `apt-ftparchive` (in a Debian one) for the Linux signing and repositories, and
+`actions/upload-pages-artifact` and `actions/deploy-pages` (GitHub Pages). WiX 6
 and later make the person installing it accept a fee-related EULA (`wix eula accept`), so 5.0.2 is pinned deliberately.
 
 ---

@@ -32,8 +32,24 @@ your own tools. Coming from EF Core migrations, Flyway, or DbUp? [Why pgproj?](d
 
 ## Installing
 
-Download pgproj from the [releases page](https://github.com/CoryGM/pgproj/releases). The builds are self-contained: **no .NET installation is
-needed** to run them.
+The builds are self-contained: **no .NET installation is needed** to run them.
+
+**Debian, Ubuntu, Fedora, RHEL:** install from pgproj's signed package repositories, so updates come with the system's own (amd64/x86_64 and
+arm64/aarch64; [all the details](https://corygm.github.io/pgproj/)):
+
+```sh
+# Debian, Ubuntu
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://corygm.github.io/pgproj/pgproj.asc | sudo tee /etc/apt/keyrings/pgproj.asc >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/pgproj.asc] https://corygm.github.io/pgproj/apt stable main" | sudo tee /etc/apt/sources.list.d/pgproj.list
+sudo apt update && sudo apt install pgproj
+
+# Fedora, RHEL
+sudo curl -fsSL -o /etc/yum.repos.d/pgproj.repo https://corygm.github.io/pgproj/pgproj.repo
+sudo dnf install pgproj
+```
+
+**Everything else**, and the same packages as files: the [releases page](https://github.com/CoryGM/pgproj/releases).
 
 | Platform | Download | Install |
 |---|---|---|
@@ -55,7 +71,10 @@ pgproj --version
   `xattr -dr com.apple.quarantine pgproj-<version>-osx-arm64`. Intel Macs are not supported.
 - **Linux:** pgproj needs OpenSSL 3 and ICU (`libicu`), and uses Kerberos (`libgssapi-krb5`) when it is there; the `.deb` and `.rpm` packages install
   all three.
-- **Checking a download:** every release has a `SHA256SUMS.txt` (`sha256sum --check --ignore-missing SHA256SUMS.txt`) and a software bill of materials.
+- **Checking a download:** every release has a `SHA256SUMS.txt` (`sha256sum --check --ignore-missing SHA256SUMS.txt`), signed in
+  `SHA256SUMS.txt.asc` with the [Linux signing key](packaging/linux/pgproj-signing-key.asc) (`gpg --import pgproj-signing-key.asc`, then
+  `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`), build provenance (`gh attestation verify <file> --repo CoryGM/pgproj`), and a software bill of
+  materials. The `.rpm` packages are signed with the same key; apt checks the `.deb` packages through the signed repository.
 
 To use pgproj from .NET code instead, add the [library](#using-pgproj-as-a-library). To build it from source you need the .NET 10 SDK; see
 [`DEVELOPING.md`](DEVELOPING.md).
