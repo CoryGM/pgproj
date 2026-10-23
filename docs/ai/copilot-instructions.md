@@ -90,6 +90,7 @@ Copilot must preserve the following architectural rules:
   - `pgproj diff`
   - `pgproj publish`
   - `pgproj document`
+  - `pgproj about` (G-332)
 - Copilot must not rename commands or options.
 - Copilot must not change required/optional flags without explicit instruction.
 

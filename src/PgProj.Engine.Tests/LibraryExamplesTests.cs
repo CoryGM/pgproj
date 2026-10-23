@@ -330,6 +330,40 @@ public sealed partial class LibraryExamplesTests
     }
 
     [TestMethod]
+    public async Task DescribingTheEnvironment()
+    {
+        var fixture = new ProjectFixture();
+        fixture.WriteToDisk();
+        try
+        {
+            var projectFile = fixture.ProjectFile;
+            var connectionString = MalformedConnectionString;
+            var cancellationToken = TestContext.CancellationToken;
+
+            var about = await new PgProjEngine().AboutAsync(
+                new AboutRequest { ProjectFilePath = projectFile, TargetConnectionString = connectionString, TargetConnectionOrigin = "settings" },
+                cancellationToken);
+
+            Console.WriteLine($"pgproj {about.EngineVersion} on {about.OperatingSystem} ({about.Runtime}); parser loads: {about.ParserLoaded}");
+            if (about.Target is { } target)
+            {
+                Console.WriteLine(target.Status == AboutConnectionStatus.Connected
+                    ? $"{target.Host}: PostgreSQL {target.ServerVersion}, superuser: {target.IsSuperuser}"
+                    : $"{target.Host}: {target.Message}");
+            }
+
+            Assert.AreEqual(AboutProjectStatus.Found, about.ProjectStatus);
+            Assert.IsTrue(about.ParserLoaded);
+            Assert.AreEqual(AboutConnectionStatus.Failed, about.Target!.Status);
+            Assert.AreEqual("settings", about.Target.Origin);
+        }
+        finally
+        {
+            fixture.Delete();
+        }
+    }
+
+    [TestMethod]
     public async Task ProgressAndCancellation()
     {
         var fixture = new ProjectFixture();

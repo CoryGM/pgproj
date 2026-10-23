@@ -48,13 +48,14 @@ the engine existed.
 
 | File | What it does |
 |---|---|
-| `Program.cs` | The root command, the five commands, `-h` as `--help`, `CommandLineAliases` (`--excludeSchemas`), and `HelpLayout`. |
-| `BuildCommand.cs`, `DiffCommand.cs`, `PublishCommand.cs`, `InitCommand.cs`, `DocumentCommand.cs` | One per command: its options and help, the request built from them, the call to the engine, and the result printed, written, and turned into an exit code. The hooks (`AfterBuild`, `AfterPlan`, `AfterScaffold`) are where a command prints the header and the diagnostics before a slow database read, the script and the warnings before anything runs, and writes `init`'s files before the report is made. |
+| `Program.cs` | The root command, the six commands, `-h` as `--help`, `CommandLineAliases` (`--excludeSchemas`), and `HelpLayout`. |
+| `BuildCommand.cs`, `DiffCommand.cs`, `PublishCommand.cs`, `InitCommand.cs`, `DocumentCommand.cs`, `AboutCommand.cs` | One per command: its options and help, the request built from them, the call to the engine, and the result printed, written, and turned into an exit code. The hooks (`AfterBuild`, `AfterPlan`, `AfterScaffold`) are where a command prints the header and the diagnostics before a slow database read, the script and the warnings before anything runs, and writes `init`'s files before the report is made. |
 | `ConnectionSettings.cs` | The connection strings from the options and the environment variables (`PGPROJ_SOURCE_CONNECTION`, `PGPROJ_TARGET_CONNECTION`). |
 | `CliLog.cs`, `LogProgress.cs` | Verbosity (`--verbose`, `--quiet`), standard output and standard error, password masking on every line it writes (the engine's messages arrive masked; this also covers the command's own lines, such as an unexpected error's message), and the engine's events written as the `[verbose]` and progress lines. |
 | `DiffOutputWriter.cs`, `TenantDiffOutput.cs` | The text of a change set and of a tenants comparison; `--format json` writes `CompareResult.ToJson` and `BuildResult.ToJson` instead. |
 | `ErdFiles.cs`, `ErdOptions.cs`, `FilePlacement.cs`, `Documentation/DocumentationFiles.cs` | Where a diagram and the documentation go, and a file already there (`--erd-existing`, `--existing`). |
 | `HelpLayout.cs` | `--help`. |
+| `InstallKind.cs` | How this copy was installed (a .NET tool, a package, the installer, an archive), which `about` prints: it describes the shell, so it is the shell's. |
 | `SourceProjectOptions.cs` | The `--source-connection` option of `build`, `diff`, and `publish`. |
 | `CliContext.cs` | The diagnostics' text form (`file:line:column-endLine:endColumn: [Severity] message`), paths shown relative to the current folder, and `pgproj.json` read alone (for `document`'s connection). Everything else is the engine's: a command calls it, and so does a test of what the engine decides. |
 

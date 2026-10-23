@@ -24,6 +24,7 @@ var rootCommand = new RootCommand("pgproj")
           pgproj diff --target-connection "Host=localhost;Database=app"
           pgproj publish --target-connection "Host=localhost;Database=app" --execute
           pgproj document --format html,markdown,json
+          pgproj about
         """,
 };
 
@@ -32,6 +33,7 @@ rootCommand.Subcommands.Add(BuildCommand.Create(cliContext));
 rootCommand.Subcommands.Add(DiffCommand.Create(cliContext));
 rootCommand.Subcommands.Add(PublishCommand.Create(cliContext));
 rootCommand.Subcommands.Add(DocumentCommand.Create(cliContext));
+rootCommand.Subcommands.Add(AboutCommand.Create(cliContext));
 HelpLayout.Install(rootCommand);
 
 return await rootCommand.Parse(args).InvokeAsync();

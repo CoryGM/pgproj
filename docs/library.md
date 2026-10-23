@@ -294,6 +294,30 @@ foreach (var problem in documentation.Problems)
 }
 ```
 
+## Describing the environment
+
+`AboutAsync` is what `pgproj about` prints: the engine's version, the operating system and runtime, whether PostgreSQL's parser loads, the project as it is
+read (not built), and the target and source databases with where each connection string came from, the server's version, and the role's privileges. Nothing
+it cannot read is an error: a missing project or a database it cannot reach within `ConnectTimeout` is in the result. It changes nothing, and no password
+is in the result. A shell that shows a support or diagnostics page uses it.
+
+```csharp
+var about = await new PgProjEngine().AboutAsync(
+    new AboutRequest { ProjectFilePath = projectFile, TargetConnectionString = connectionString, TargetConnectionOrigin = "settings" },
+    cancellationToken);
+
+Console.WriteLine($"pgproj {about.EngineVersion} on {about.OperatingSystem} ({about.Runtime}); parser loads: {about.ParserLoaded}");
+if (about.Target is { } target)
+{
+    Console.WriteLine(target.Status == AboutConnectionStatus.Connected
+        ? $"{target.Host}: PostgreSQL {target.ServerVersion}, superuser: {target.IsSuperuser}"
+        : $"{target.Host}: {target.Message}");
+}
+```
+
+`Connect = false` describes each connection string without connecting. A connection the request leaves null is taken from the project's `pgproj.json`, and
+its `Origin` says so.
+
 ## Progress and cancellation
 
 Every request takes an `IProgress<EngineEvent>`. The engine reports as it goes: the project read, each file, the model built, each database connected to and

@@ -46,52 +46,21 @@ body:
       description: The smallest SQL (project files, or what is in the database) that makes it happen, if you have it.
       render: sql
 
-  - type: input
-    id: version
+  - type: textarea
+    id: about
     attributes:
-      label: pgproj version
-      description: What `pgproj --version` prints.
-      placeholder: 0.1.0+bcc8f6a...
-    validations:
-      required: true
-
-  - type: dropdown
-    id: install
-    attributes:
-      label: How you installed it
-      options:
-        - .NET tool (dotnet tool install)
-        - apt repository (Debian, Ubuntu)
-        - dnf repository (Fedora, RHEL)
-        - .deb or .rpm file
-        - Windows installer (.msi)
-        - Archive (.zip or .tar.gz)
-        - Built from source
-        - The PgProj.Engine NuGet package (library)
-    validations:
-      required: true
-
-  - type: input
-    id: os
-    attributes:
-      label: Operating system
-      placeholder: Windows 11 x64, Ubuntu 24.04 arm64, macOS 15 (Apple silicon), ...
-    validations:
-      required: true
-
-  - type: dropdown
-    id: postgres
-    attributes:
-      label: PostgreSQL server version
-      description: The server pgproj connected to, if it connected to one.
-      options:
-        - "18"
-        - "17"
-        - "16"
-        - "15"
-        - "14"
-        - Another version
-        - No server involved
+      label: What pgproj about prints
+      description: |
+        Run `pgproj about` in the folder you ran the command in, with the same `--project` and connection options, and paste what it prints. It shows
+        the version, how pgproj was installed, the operating system, the project it found, and each database's PostgreSQL version. It never prints a
+        password; remove host names and paths if they are private. If pgproj will not install or start, give the operating system and how you
+        tried to install it instead.
+      render: text
+      placeholder: |
+        pgproj <version>+<commit>
+          Installed as: a .NET tool
+          Operating system: Ubuntu 24.04.1 LTS (X64)
+          ...
     validations:
       required: true
 
