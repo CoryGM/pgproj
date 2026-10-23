@@ -14,8 +14,7 @@ Include what you can of:
 
 **Never send a real password, connection string, or data from a real database.** Use a throwaway database and made-up values.
 
-pgproj is maintained by one person. A report is acknowledged as soon as it is read, usually within a week, and you will hear what is planned and
-when a fix ships. A fix goes into a new release; there are no backports to older versions.
+pgproj is maintained by one person. You will hear back on the report, what is planned, and when a fix ships. A fix goes into a new release; there are no backports to older versions.
 
 ## Supported versions
 
