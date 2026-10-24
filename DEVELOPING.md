@@ -335,7 +335,9 @@ Build the Linux packages on Linux (a Windows file system loses the executable bi
   `http://timestamp.acs.microsoft.com` (the service's certificates last about three days), and checks each with `signtool verify /pa`. Nothing secret is
   stored: the `windows` job runs in the environment `release` (Settings, Environments; it allows tags `v*` and the branch `main`, so a dry run signs
   too), whose secrets `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` name an app registration with a federated credential for
-  `repo:CoryGM/pgproj:environment:release` and the Artifact Signing Certificate Profile Signer role on the profile. signtool's plugin
+  `repo:CoryGM@1860202/pgproj@1431014955:environment:release` and the Artifact Signing Certificate Profile Signer role on the profile. (The repository
+  uses GitHub's immutable OIDC subject, which carries the owner's and the repository's IDs, so a recreated repository gets a new ID and the credential
+  must be changed to it.) signtool's plugin
   (`Microsoft.ArtifactSigning.Client`, its version and SHA256 pinned in `release.yml`) logs in as that app with GitHub's OIDC token; Azure accepts one for
   about five minutes, so `build-packages.ps1` fetches a new one before each signing. No `az login` and no Azure subscription is involved. Without the
   secrets (a fork) the files are built unsigned. A local `build-packages.ps1` builds unsigned files.
