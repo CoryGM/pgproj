@@ -330,9 +330,15 @@ Build the Linux packages on Linux (a Windows file system loses the executable bi
 
 **Signing.**
 
-- *Windows:* the workflow signs `pgproj.exe`, `PgProj.*.dll`, and the MSI when the repository secrets `WINDOWS_SIGNING_CERT_BASE64` (the
-  `.pfx`, base64-encoded) and `WINDOWS_SIGNING_CERT_PASSWORD` exist, and leaves them unsigned when they do not. The signing step has
-  not been run against a real certificate yet.
+- *Windows* (G-333): the workflow signs `pgproj.exe` and `PgProj.*.dll` before they are zipped and packed into the MSI, then the MSI, with **Azure
+  Artifact Signing** (account `pgprojsigning` in East US, certificate profile `pgprojrelease`, subject `CN=Cory Maass`), timestamped by
+  `http://timestamp.acs.microsoft.com` (the service's certificates last about three days), and checks each with `signtool verify /pa`. Nothing secret is
+  stored: the `windows` job runs in the environment `release` (Settings, Environments; it allows tags `v*` and the branch `main`, so a dry run signs
+  too), whose secrets `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` name an app registration with a federated credential for
+  `repo:CoryGM/pgproj:environment:release` and the Artifact Signing Certificate Profile Signer role on the profile. signtool's plugin
+  (`Microsoft.ArtifactSigning.Client`, its version and SHA256 pinned in `release.yml`) logs in as that app with GitHub's OIDC token; Azure accepts one for
+  about five minutes, so `build-packages.ps1` fetches a new one before each signing. No `az login` and no Azure subscription is involved. Without the
+  secrets (a fork) the files are built unsigned. A local `build-packages.ps1` builds unsigned files.
 - *macOS:* the files are ad-hoc signed only (Apple silicon will not run an unsigned executable). They are not signed with a Developer
   ID and not notarized (no Apple Developer account), so a browser download is quarantined (`README.md`, Installing).
 - *Linux* (G-331): one OpenPGP key, `packaging/linux/pgproj-signing-key.asc` (the public half; the fingerprint is checked against the secret), signs the

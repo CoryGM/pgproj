@@ -2,10 +2,14 @@
 .SYNOPSIS
   Builds the Windows artifacts of one runtime (G-81): pgproj-<version>-<rid>.zip and pgproj-<version>-<rid>.msi.
 .DESCRIPTION
-  Publishes pgproj self-contained, signs the executables when a code-signing certificate is configured, then makes the zip
-  and the MSI installer (WiX 5: `dotnet tool install --global wix --version 5.0.2`) and signs the MSI.
-  Signing is on only when WINDOWS_SIGNING_CERT_FILE (a .pfx path) and WINDOWS_SIGNING_CERT_PASSWORD are set; without them the
-  artifacts are unsigned and Windows SmartScreen will warn on first run.
+  Publishes pgproj self-contained, signs the executables when signing is configured, then makes the zip and the MSI installer
+  (WiX 5: `dotnet tool install --global wix --version 5.0.2`) and signs the MSI.
+  Signing (G-333) goes through Azure Artifact Signing: signtool with Microsoft's plugin, which takes its certificate from the
+  service. It is on only when ARTIFACT_SIGNING_DLIB (the plugin, Azure.CodeSigning.Dlib.dll from the Microsoft.ArtifactSigning.Client
+  package, x64) and ARTIFACT_SIGNING_METADATA (its metadata.json: the endpoint, the account, the certificate profile) are set. The
+  plugin logs in as an identity allowed to sign with that profile; on GitHub Actions that is a workload identity (AZURE_CLIENT_ID,
+  AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE), and the script writes a fresh GitHub OIDC token to the file before each signing.
+  Each signed file is then verified. Without them the artifacts are unsigned and Windows SmartScreen will warn on first run.
 .EXAMPLE
   packaging/windows/build-packages.ps1 -Rid win-x64 -Version 0.1.0 -Output dist
 #>
@@ -35,11 +39,22 @@ function Find-SignTool {
     $found.FullName
 }
 
+# Azure accepts a GitHub OIDC token for about five minutes, and a build takes longer, so each signing gets a new one.
+function Update-FederatedToken {
+    if (-not ($env:AZURE_FEDERATED_TOKEN_FILE -and $env:ACTIONS_ID_TOKEN_REQUEST_URL)) { return }
+    $response = Invoke-RestMethod -Uri "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=api://AzureADTokenExchange" `
+        -Headers @{ Authorization = "Bearer $($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)" }
+    Set-Content -NoNewline -Path $env:AZURE_FEDERATED_TOKEN_FILE -Value $response.value
+}
+
+# Artifact Signing's certificates last about three days, so the timestamp is what keeps a signature valid after that.
 function Sign-File([string[]]$Path) {
-    if (-not $env:WINDOWS_SIGNING_CERT_FILE) { return }
+    if (-not ($env:ARTIFACT_SIGNING_DLIB -and $env:ARTIFACT_SIGNING_METADATA)) { return }
+    Update-FederatedToken
     $signtool = Find-SignTool
-    Invoke-Native $signtool sign /fd SHA256 /td SHA256 /tr 'http://timestamp.digicert.com' `
-        /f $env:WINDOWS_SIGNING_CERT_FILE /p $env:WINDOWS_SIGNING_CERT_PASSWORD $Path
+    Invoke-Native $signtool sign /v /fd SHA256 /td SHA256 /tr 'http://timestamp.acs.microsoft.com' `
+        /dlib $env:ARTIFACT_SIGNING_DLIB /dmdf $env:ARTIFACT_SIGNING_METADATA $Path
+    Invoke-Native $signtool verify /pa $Path
 }
 
 if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
