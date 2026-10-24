@@ -27,8 +27,10 @@ $name = "pgproj-$Version-$Rid"
 $publishDir = Join-Path $Output $name
 $wixArch = $Rid -replace '^win-', ''
 
+# An argument that is a list (Sign-File's files) is passed as one argument per item, not joined into one string.
 function Invoke-Native {
-    & $args[0] $args[1..($args.Count - 1)]
+    $arguments = @($args[1..($args.Count - 1)] | ForEach-Object { $_ })
+    & $args[0] $arguments
     if ($LASTEXITCODE -ne 0) { throw "$($args[0]) failed with exit code $LASTEXITCODE" }
 }
 
