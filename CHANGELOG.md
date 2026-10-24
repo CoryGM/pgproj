@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-23
+
 ### Installing
 
 - **The Windows builds are signed**: `pgproj.exe`, pgproj's DLLs, and the `.msi`, with a timestamped signature whose publisher is Cory Maass, so Windows
