@@ -16,8 +16,9 @@ where each connection came from.
 
 ### Windows protected your PC
 
-SmartScreen shows this the first time an unsigned program from the internet runs, and pgproj's Windows builds are not signed yet. Choose **More info**,
-then **Run anyway**. The `.msi` asks the same once, when it installs.
+SmartScreen shows this the first time an unsigned program from the internet runs, and sometimes for a signed one it has seen little of. pgproj's
+Windows builds are signed from the release after 0.2.0 (publisher Cory Maass); 0.2.0 and earlier are not. Choose **More info**, then **Run anyway**.
+The `.msi` asks the same once, when it installs.
 
 ### macOS: "pgproj" cannot be opened, or is damaged
 

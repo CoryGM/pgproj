@@ -74,7 +74,8 @@ Arm64 files are named the same way (`win-arm64`, `_arm64.deb`, `.aarch64.rpm`, `
 pgproj --version
 ```
 
-- **Windows:** the builds are not signed yet, so SmartScreen may warn the first time; choose **More info**, then **Run anyway**.
+- **Windows:** releases after 0.2.0 are signed (publisher Cory Maass); 0.2.0 and earlier are not. SmartScreen may still warn the first time, while
+  the signature is new to it; choose **More info**, then **Run anyway**.
 - **macOS:** the build is not notarized, so macOS blocks a file downloaded with a browser. After unpacking, clear the flag once:
   `xattr -dr com.apple.quarantine pgproj-<version>-osx-arm64`. Intel Macs are not supported.
 - **Linux:** pgproj needs OpenSSL 3 and ICU (`libicu`), and uses Kerberos (`libgssapi-krb5`) when it is there; the `.deb` and `.rpm` packages install

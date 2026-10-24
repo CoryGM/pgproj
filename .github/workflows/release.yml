@@ -16,9 +16,13 @@ name: Release
 # repositories that a tag publishes to GitHub Pages (https://corygm.github.io/pgproj, packaging/linux/build-repository.sh). Without the key a
 # throwaway one is used to test every signing step, and nothing signed with it is released or published.
 #
+# The Windows files (pgproj.exe, PgProj.*.dll, the .msi) are signed with Azure Artifact Signing (G-333): the windows job runs in the environment
+# "release" (which allows tags v* and the branch main), and signtool with Microsoft's plugin logs in to Azure with GitHub's OIDC token, through a
+# federated credential that trusts that environment (packaging/windows/build-packages.ps1). No certificate or key is stored here.
+#
 # Optional secrets (Settings > Secrets and variables > Actions):
-#   WINDOWS_SIGNING_CERT_BASE64    the code-signing certificate (.pfx), base64-encoded
-#   WINDOWS_SIGNING_CERT_PASSWORD  its password
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID
+#                                  secrets of the environment "release": the app registration allowed to sign with the certificate profile
 #   LINUX_SIGNING_KEY              the Linux signing key, an armored OpenPGP secret key (DEVELOPING.md, "Releasing", Signing)
 #   LINUX_SIGNING_PASSPHRASE       its passphrase
 # Without them the Windows files are built unsigned, and the Linux .rpm files and checksums are unsigned and no repository is published. macOS
@@ -186,13 +190,22 @@ jobs:
     needs: [version, linux]
     runs-on: windows-latest
     timeout-minutes: 45
+    environment: release # its secrets, and the federated credential trusts it
+    permissions:
+      contents: read
+      id-token: write # Artifact Signing: GitHub's OIDC token is exchanged for an Azure token
     strategy:
       fail-fast: false
       matrix:
         rid: [win-x64, win-arm64]
     env:
-      HAS_SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 != '' }}
-      WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARTIFACT_SIGNING_ENDPOINT: https://eus.codesigning.azure.net # the account's region, East US
+      ARTIFACT_SIGNING_ACCOUNT: pgprojsigning
+      ARTIFACT_SIGNING_PROFILE: pgprojrelease
+      ARTIFACT_SIGNING_CLIENT: 1.0.146 # Microsoft.ArtifactSigning.Client, the signtool plugin
+      ARTIFACT_SIGNING_CLIENT_SHA256: 7761e5d8f31e54b764da21d33cd8b0a2940e1b05526c7dfcb5e94b0431426f70
     steps:
       - uses: actions/checkout@v7
         with:
@@ -207,15 +220,31 @@ jobs:
       - name: Install WiX
         run: dotnet tool install --global wix --version 5.0.2
 
-      - name: Prepare the signing certificate
-        if: env.HAS_SIGNING_CERT == 'true'
+      - name: Prepare Artifact Signing
+        if: env.AZURE_CLIENT_ID != ''
         shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
         run: |
-          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
-          "WINDOWS_SIGNING_CERT_FILE=$pfx" >> $env:GITHUB_ENV
+          $dir = Join-Path $env:RUNNER_TEMP 'artifact-signing'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $package = Join-Path $dir 'client.zip' # a .nupkg is a zip, and Expand-Archive takes only the .zip extension
+          $id = 'microsoft.artifactsigning.client'
+          Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/$id/$env:ARTIFACT_SIGNING_CLIENT/$id.$env:ARTIFACT_SIGNING_CLIENT.nupkg" -OutFile $package
+          $hash = (Get-FileHash -Algorithm SHA256 $package).Hash
+          if ($hash -ne $env:ARTIFACT_SIGNING_CLIENT_SHA256) { throw "Microsoft.ArtifactSigning.Client $env:ARTIFACT_SIGNING_CLIENT has SHA256 $hash" }
+          Expand-Archive $package (Join-Path $dir 'client')
+          # Only the workload identity (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE) is tried.
+          $metadata = Join-Path $dir 'metadata.json'
+          @{
+            Endpoint = $env:ARTIFACT_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:ARTIFACT_SIGNING_ACCOUNT
+            CertificateProfileName = $env:ARTIFACT_SIGNING_PROFILE
+            CorrelationId = "$env:GITHUB_REPOSITORY run $env:GITHUB_RUN_ID ${{ matrix.rid }}"
+            ExcludeCredentials = @('ManagedIdentityCredential', 'SharedTokenCacheCredential', 'VisualStudioCredential', 'VisualStudioCodeCredential',
+              'AzureCliCredential', 'AzurePowerShellCredential', 'AzureDeveloperCliCredential', 'InteractiveBrowserCredential')
+          } | ConvertTo-Json | Set-Content $metadata
+          "ARTIFACT_SIGNING_DLIB=$(Join-Path $dir 'client\bin\x64\Azure.CodeSigning.Dlib.dll')" >> $env:GITHUB_ENV
+          "ARTIFACT_SIGNING_METADATA=$metadata" >> $env:GITHUB_ENV
+          "AZURE_FEDERATED_TOKEN_FILE=$(Join-Path $dir 'github-oidc-token')" >> $env:GITHUB_ENV
 
       - name: Build the zip and the installer
         shell: pwsh
@@ -237,11 +266,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Get-Content install.log -Tail 50; throw 'pgproj did not run after the MSI install' }
           Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -NoNewWindow
           if (Test-Path "$env:ProgramFiles\pgproj") { throw 'the uninstall left the install folder behind' }
-
-      - name: Remove the signing certificate
-        if: always() && env.HAS_SIGNING_CERT == 'true'
-        shell: pwsh
-        run: Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\signing.pfx"
 
       - uses: actions/upload-artifact@v7
         with:
