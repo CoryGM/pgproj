@@ -22,10 +22,18 @@ The `.msi` asks the same once, when it installs.
 
 ### macOS: "pgproj" cannot be opened, or is damaged
 
-macOS quarantines a file downloaded with a browser, and pgproj is not notarized by Apple. Clear the flag once, on the unpacked folder:
+macOS quarantines a file downloaded with a browser, and pgproj is not notarized by Apple. Two files in the download are blocked: `pgproj` and the
+SQL parser library it loads, `runtimes/osx-arm64/native/libpg_query.dylib`. Clear the flag once, on the whole unpacked folder (`-r` reaches the library):
 
 ```sh
 xattr -dr com.apple.quarantine pgproj-<version>-osx-arm64
+```
+
+If you cleared it only on `pgproj`, `pgproj` starts, but macOS shows the same message for `libpg_query.dylib` when pgproj loads it. Clear the
+flag on the library too, from the unpacked folder:
+
+```sh
+xattr -d com.apple.quarantine runtimes/osx-arm64/native/libpg_query.dylib
 ```
 
 pgproj runs on Apple silicon only; there is no Intel (x64) Mac build.

@@ -76,8 +76,9 @@ pgproj --version
 
 - **Windows:** releases after 0.2.0 are signed (publisher Cory Maass); 0.2.0 and earlier are not. SmartScreen may still warn the first time, while
   the signature is new to it; choose **More info**, then **Run anyway**.
-- **macOS:** the build is not notarized, so macOS blocks a file downloaded with a browser. After unpacking, clear the flag once:
-  `xattr -dr com.apple.quarantine pgproj-<version>-osx-arm64`. Intel Macs are not supported.
+- **macOS:** the build is not notarized, so macOS blocks the files of a browser download: `pgproj` and the SQL parser library it loads,
+  `runtimes/osx-arm64/native/libpg_query.dylib`. After unpacking, clear the flag once on the whole folder, not only on `pgproj` (`-r` reaches the
+  library): `xattr -dr com.apple.quarantine pgproj-<version>-osx-arm64`. Intel Macs are not supported.
 - **Linux:** pgproj needs OpenSSL 3 and ICU (`libicu`), and uses Kerberos (`libgssapi-krb5`) when it is there; the `.deb` and `.rpm` packages install
   all three.
 - **Checking a download:** every release has a `SHA256SUMS.txt` (`sha256sum --check --ignore-missing SHA256SUMS.txt`), signed in
