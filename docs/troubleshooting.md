@@ -50,6 +50,7 @@ the .NET tool (`dotnet tool install --global pgproj`) installs on such a platfor
 Run pgproj on a supported platform, or in a Debian or Ubuntu based container on one that is not. A .NET program that uses the
 [`PgProj.Engine` package](library.md#referencing-it) and builds for an unsupported runtime (`-r osx-x64`, `-r linux-musl-x64`) gets error `PGPROJ001`
 at build time instead; built for no runtime in particular, it gets this error when it runs on one.
+
 ### Couldn't find a valid ICU package installed on the system
 
 .NET needs ICU on Linux. Install it: on Debian and Ubuntu the `libicu` package of your release (`sudo apt install libicu74` on Ubuntu 24.04,
