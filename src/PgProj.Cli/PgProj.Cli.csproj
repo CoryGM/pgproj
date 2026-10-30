@@ -50,7 +50,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />
-    <PackageReference Include="System.CommandLine" Version="2.0.13" />
+    <PackageReference Include="System.CommandLine" Version="2.0.14" />
   </ItemGroup>
 
   <!-- A build carries libpg_query for every platform (PgProj.Parser), so one build runs anywhere. A publish for a runtime
