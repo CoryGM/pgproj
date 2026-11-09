@@ -326,7 +326,10 @@ dotnet tool install --global wix --version 5.0.2
 packaging/windows/build-packages.ps1 -Rid win-x64 -Version 0.1.0 -Output dist   # .zip and .msi
 ```
 
-Build the Linux packages on Linux (a Windows file system loses the executable bit that the `.tar.gz` needs).
+Build the Linux packages on Linux (a Windows file system loses the executable bit that the `.tar.gz` needs). They carry the .NET runtime of the SDK
+that builds them, which must be a .NET 10 runtime with OpenSSL 4 support (expected in 10.0.15) to load OpenSSL 4 (Fedora 45, Ubuntu 26.10):
+`verify-packages.sh` checks the archive with only OpenSSL 4 and the `.rpm` on the newest Fedora, and both fail on a runtime without it with
+`No usable version of libssl was found` (G-334).
 
 **Signing.**
 

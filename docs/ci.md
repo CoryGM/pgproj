@@ -37,7 +37,8 @@ steps:
 ```
 
 On an Arm64 runner use `linux-arm64`; on a Windows runner download the `win-x64.zip`. GitHub's Ubuntu runners have what pgproj needs (OpenSSL 3,
-ICU); a minimal container image needs ICU and OpenSSL 3 installed ([troubleshooting](troubleshooting.md#installing-and-running)).
+ICU); a minimal container image needs ICU and OpenSSL installed (OpenSSL 3, or 4 for releases after 0.2.1;
+[troubleshooting](troubleshooting.md#installing-and-running)).
 
 A job that has .NET 10 already (it ran `actions/setup-dotnet`) can install the .NET tool instead:
 `dotnet tool install --global pgproj --version "$PGPROJ_VERSION"`.

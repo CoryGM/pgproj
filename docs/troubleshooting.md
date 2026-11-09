@@ -51,6 +51,22 @@ Run pgproj on a supported platform, or in a Debian or Ubuntu based container on 
 [`PgProj.Engine` package](library.md#referencing-it) and builds for an unsupported runtime (`-r osx-x64`, `-r linux-musl-x64`) gets error `PGPROJ001`
 at build time instead; built for no runtime in particular, it gets this error when it runs on one.
 
+### No usable version of libssl was found
+
+```text
+No usable version of libssl was found
+```
+
+.NET prints this, and the command stops, when pgproj connects to a database (`diff`, `publish`, `init`) on a Linux system without an OpenSSL it can
+load. `build` and the other commands that only read files still work.
+
+- **Fedora 45 and later** (and any system with only OpenSSL 4): pgproj 0.2.1 and earlier load only OpenSSL 3. Update to a later release, which also
+  loads OpenSSL 4. Until you can, Fedora's own .NET may help: install it and the .NET tool, which runs on it (`sudo dnf install dotnet-sdk-10.0`,
+  then `dotnet tool install --global pgproj`). This is not an official workaround; it was tested only on x64, in a Fedora 45 container, with 0.2.1
+  connecting to PostgreSQL 18 for `diff`.
+- **Another system:** install OpenSSL: `sudo apt install libssl3t64` (Ubuntu 24.04), `libssl3` (Debian 12), or `sudo dnf install openssl-libs`
+  (Fedora, RHEL). The `.deb` and `.rpm` packages install it for you; the `.tar.gz` does not.
+
 ### Couldn't find a valid ICU package installed on the system
 
 .NET needs ICU on Linux. Install it: on Debian and Ubuntu the `libicu` package of your release (`sudo apt install libicu74` on Ubuntu 24.04,

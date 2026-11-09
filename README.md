@@ -79,8 +79,9 @@ pgproj --version
 - **macOS:** the build is not notarized, so macOS blocks the files of a browser download: `pgproj` and the SQL parser library it loads,
   `runtimes/osx-arm64/native/libpg_query.dylib`. After unpacking, clear the flag once on the whole folder, not only on `pgproj` (`-r` reaches the
   library): `xattr -dr com.apple.quarantine pgproj-<version>-osx-arm64`. Intel Macs are not supported.
-- **Linux:** pgproj needs OpenSSL 3 and ICU (`libicu`), and uses Kerberos (`libgssapi-krb5`) when it is there; the `.deb` and `.rpm` packages install
-  all three.
+- **Linux:** pgproj needs OpenSSL and ICU (`libicu`), and uses Kerberos (`libgssapi-krb5`) when it is there; the `.deb` and `.rpm` packages install
+  all three. Releases after 0.2.1 work with OpenSSL 3 or 4; 0.2.1 and earlier need OpenSSL 3, so on Fedora 45 and later they cannot connect to a
+  database ([troubleshooting](docs/troubleshooting.md#no-usable-version-of-libssl-was-found)).
 - **Checking a download:** every release has a `SHA256SUMS.txt` (`sha256sum --check --ignore-missing SHA256SUMS.txt`), signed in
   `SHA256SUMS.txt.asc` with the [Linux signing key](packaging/linux/pgproj-signing-key.asc) (fingerprint `2154 E140 C291 AF3C 079E  B30A C954 6AE5 6857 FE31`; `gpg --import pgproj-signing-key.asc`, then
   `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`), build provenance (`gh attestation verify <file> --repo CoryGM/pgproj`), and a software bill of

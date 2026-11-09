@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+### Installing
+
+- **Linux builds work with OpenSSL 4**, so pgproj connects to databases on Fedora 45 and later, where 0.2.1 stopped with
+  `No usable version of libssl was found`. They are built on a .NET runtime that loads OpenSSL 4, and the `.deb` also accepts `libssl4`.
+
 ### Commands
 
 - **The script `publish` prints or writes is atomic:** it starts with `BEGIN;` and ends with `COMMIT;`, so `psql -f deploy.sql` applies all of it or,
