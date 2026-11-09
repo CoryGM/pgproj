@@ -34,7 +34,7 @@ internal sealed class DeepTypeStructurePass
                 {
                     "composite" => MapCompositeType(typeDefinition, typeNode, diagnostics) with { IsComposite = true },
                     "range" => WithComparableSubtype(MapRangeType(typeDefinition, typeNode.RangeOptions ?? []), typeNode.RangeSubtype),
-                    "enum" => typeDefinition with { CompositeFields = [], RangeOptions = null, EnumLabels = typeNode.EnumLabels, IsEnum = true },
+                    "enum" => typeDefinition with { CompositeFields = [], RangeOptions = null, EnumLabels = typeNode.EnumLabels, EnumLabelRenames = typeNode.EnumLabelRenames, IsEnum = true },
                     _ => typeDefinition,
                 };
 

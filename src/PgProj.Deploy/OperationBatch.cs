@@ -115,6 +115,14 @@ public sealed record class OperationBatch
         {
             DropOperation { Node: TableDefinition } drop
                 => new DestructiveOperation { Operation = drop, Reasons = ["table dropped"] },
+            // An enum type rebuilt under its columns that loses a label (G-191, decision 2): a row holding it cannot be kept; the move then fails and the
+            // publish is rolled back, so nothing is lost silently, but the change is one to consent to. A reorder loses nothing.
+            EnumSwapOperation { RemovedLabels.Count: > 0 } swap
+                => new DestructiveOperation
+                {
+                    Operation = swap,
+                    Reasons = [$"enum label{(swap.RemovedLabels.Count == 1 ? string.Empty : "s")} {string.Join(", ", swap.RemovedLabels.Select(static label => $"'{label}'"))} removed while columns use the type; a row holding one stops the publish"],
+                },
             DropOperation { Node: ViewDefinition { IsMaterialized: true } } drop
                 => new DestructiveOperation { Operation = drop, Reasons = ["materialized view dropped; its computed data is lost until it is refreshed"] },
             DropOperation { Node: TypeDefinition type } drop when SqlOperation.IsExtension(type)

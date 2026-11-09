@@ -23,6 +23,12 @@ public sealed record TypeNode(string? Name, string? SchemaName, string RawStatem
     /// <summary>An enum's labels, in declaration order, exactly as pg_query read them (G-90 part 4).</summary>
     public IReadOnlyList<string> EnumLabels { get; init; } = [];
 
+    /// <summary>
+    /// The labels the author says were renamed (G-191: <c>-- @renamed-label: old -> new</c> on the comment lines above the <c>CREATE TYPE</c>), in the order
+    /// written: a hint for <c>publish</c>, never compared.
+    /// </summary>
+    public IReadOnlyList<EnumLabelRename> EnumLabelRenames { get; init; } = [];
+
     /// <summary>A range type's <c>name = value</c> options, each value as written; null for any other kind of type (G-90 part 4).</summary>
     public IReadOnlyList<KeyValuePair<string, string>>? RangeOptions { get; init; }
 
@@ -47,3 +53,6 @@ public sealed record CompositeFieldTypeNode(
     /// <summary>The field's <c>COLLATE</c>, its name parts joined with dots (<c>C</c>, <c>app.ci</c>), or null when it states none (G-192); not part of <see cref="RawType"/>.</summary>
     public string? CollationName { get; init; }
 }
+
+/// <summary>A label of an enum renamed from <see cref="From"/> to <see cref="To"/> (G-191), as the author's annotation says; labels are exact, as PostgreSQL compares them.</summary>
+public sealed record EnumLabelRename(string From, string To);

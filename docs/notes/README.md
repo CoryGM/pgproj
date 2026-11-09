@@ -63,6 +63,7 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Unnamed constraints and indexes](unnamed-objects.md) — the names PostgreSQL gives them, and when `build` warns
 - [Tables written with LIKE](table-like.md) — `CREATE TABLE ... (LIKE source INCLUDING ...)` as written, and what it copies
 - [Composite types](composite-types.md) — changes made in place, and the retype limitation
+- [Enum types](enum-types.md) — labels added and renamed in place, and a type rebuilt under its columns when a label is removed or reordered
 - [Base types](base-types.md) — `CREATE TYPE ... (INPUT = ..., OUTPUT = ...)` is not modeled; its functions are left out with it
 - [Views, and other definitions PostgreSQL rewrites](views.md) — comparing by PostgreSQL's own rendering
 - [SQL-standard routine bodies](sql-standard-routine-bodies.md) — `BEGIN ATOMIC` and `RETURN`

@@ -117,8 +117,12 @@ public sealed record class AlterOperation : SqlOperation
     {
         static string Literal(string label) => "'" + label.Replace("'", "''", StringComparison.Ordinal) + "'";
 
-        return (EnumLabelAdditions.Plan(oldType.EnumLabels, newType.EnumLabels) ?? [])
-            .Select(step => $"ALTER TYPE {qualifiedName} ADD VALUE {Literal(step.Label)}{(step.Position is null ? string.Empty : $" {step.Position} {Literal(step.Neighbour!)}")};")
+        // The renames the project's annotations ask for (G-191), lossless, then the inserted labels, placed among the labels as renamed.
+        var (renamed, renames) = EnumLabelAdditions.ApplyRenames(oldType.EnumLabels, newType.EnumLabelRenames);
+        return renames
+            .Select(rename => $"ALTER TYPE {qualifiedName} RENAME VALUE {Literal(rename.From)} TO {Literal(rename.To)};")
+            .Concat((EnumLabelAdditions.Plan(renamed, newType.EnumLabels) ?? [])
+                .Select(step => $"ALTER TYPE {qualifiedName} ADD VALUE {Literal(step.Label)}{(step.Position is null ? string.Empty : $" {step.Position} {Literal(step.Neighbour!)}")};"))
             .ToList();
     }
 

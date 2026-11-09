@@ -29,6 +29,7 @@ public sealed class DependencyAnalyzer
         graph.TargetNodeIds = newModel.GetAllNodes().Select(static node => node.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         graph.ReplacedUnmodeledPrivileges = oldModel.UnmodeledPrivileges;
         graph.ReplacedDependencies = oldModel.LiveDependencies;
+        graph.ReplacedTables = oldModel.Tables;
         graph.ReplacedOwners = oldModel.LiveOwners;
         graph.ReplacedConnectedRole = oldModel.ConnectedRole;
         graph.ReplacedComments = oldModel.Constraints.Values

@@ -49,6 +49,14 @@ internal static partial class LockWarnings
                 case CreateOperation { Node: ConstraintDefinition constraint } when Exists(live, constraint.SchemaName, constraint.TableName):
                     AddConstraint(warnings, constraint);
                     break;
+                // An enum type rebuilt under its columns (G-191) changes each column's type, which rewrites its table.
+                case EnumSwapOperation swap:
+                    foreach (var column in swap.Columns)
+                    {
+                        warnings.Add(new LockWarning(Key(column.SchemaName, column.TableName), $"ALTER COLUMN {column.ColumnName} TYPE (enum {swap.NodeId} rebuilt)", "rewrites the table and its indexes under an ACCESS EXCLUSIVE lock"));
+                    }
+
+                    break;
             }
         }
 

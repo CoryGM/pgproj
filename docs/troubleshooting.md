@@ -250,6 +250,20 @@ The script changes so many tables and indexes at once that PostgreSQL would run 
 `max_locks_per_transaction` value that would fit; raise it (it takes a server restart), publish in smaller steps, or pass `--allow-lock-limit` if you know
 the server has room ([Locks and large tables](notes/locks.md)).
 
+### holds a label the enum type ... no longer has
+
+```text
+Publish failed: P0001: the column app.visits.mood holds a label the enum type app.mood no longer has, so the type was not rebuilt: invalid input value for enum app.mood: "ok"
+  Hint: Change or delete those rows first (a pre-deploy script can), or keep the label.
+  The statement that failed: DO $pgproj$ BEGIN ALTER TABLE "app"."visits" ALTER COLUMN "mood" TYPE "app"."mood" USING "mood"::text::"app"."mood"; EXC...
+  Nothing was applied: the script was rolled back.
+```
+
+The project removed a label from an enum type, and a row still holds it, so the type could not be rebuilt under its column. Change those rows to a label
+the type keeps, in a pre-deploy script (`UPDATE app.visits SET mood = 'sad' WHERE mood = 'ok';`) or by hand, then publish again; or keep the label. If the
+label was renamed, not removed, say so above the `CREATE TYPE` (`-- @renamed-label: ok -> fine`), and it is renamed in place
+([Enum types](notes/enum-types.md)).
+
 ### The server refused a statement
 
 ```text

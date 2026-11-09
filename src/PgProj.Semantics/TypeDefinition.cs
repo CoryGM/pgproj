@@ -99,6 +99,12 @@ public sealed record TypeDefinition(
     /// </summary>
     public IReadOnlyList<string> EnumLabels { get; init; } = [];
 
+    /// <summary>
+    /// The project's <c>-- @renamed-label: old -> new</c> annotations (G-191): how <c>publish</c> turns the database's labels into these, never compared
+    /// (the database has none, and one already applied names a label the database no longer has).
+    /// </summary>
+    public IReadOnlyList<PgProj.Parser.EnumLabelRename> EnumLabelRenames { get; init; } = [];
+
     /// <summary>True for an enum type, which may have no labels yet (<c>CREATE TYPE t AS ENUM ()</c>, G-249): <see cref="EnumLabels"/> alone cannot tell an empty enum from a type that is not one.</summary>
     public bool IsEnum { get; init; }
 

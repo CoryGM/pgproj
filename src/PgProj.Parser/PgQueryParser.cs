@@ -711,7 +711,8 @@ public sealed partial class PgQueryParser
                             // below would visit them too and misread a composite type's fields as table columns.
                             continue;
                         case "CreateEnumStmt":
-                            AddIfNotNull(nodes, TypeStatementReader.ReadEnumType(property.Value, statementSql));
+                            // The comment lines just above the statement, where a -- @renamed-label annotation goes (G-191): pg_query starts a statement at its first word.
+                            AddIfNotNull(nodes, TypeStatementReader.ReadEnumType(property.Value, statementSql, s_context is { } enumContext ? TypeStatementReader.CommentLinesBefore(enumContext.Sql, enumContext.StatementOffset) : string.Empty));
                             break;
                         case "CreateRangeStmt":
                             AddIfNotNull(nodes, TypeStatementReader.ReadRangeType(property.Value, statementSql));

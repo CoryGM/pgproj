@@ -28,8 +28,14 @@ public sealed partial class ScriptGenerator
     /// those that use a routine it drops and recreates (G-105); then, transitively, whatever uses one of those (a view on such a view, a
     /// routine calling such a routine), since PostgreSQL won't drop an object another one uses.
     /// </summary>
-    private static DependentRebuilds FindDependentRebuilds(IEnumerable<ModifiedChange> modifiedChanges, IReadOnlySet<string> droppedRoutines, DependencyGraph graph)
+    private static DependentRebuilds FindDependentRebuilds(
+        IEnumerable<ModifiedChange> modifiedChanges,
+        IReadOnlySet<string> droppedRoutines,
+        DependencyGraph graph,
+        IEnumerable<KeyValuePair<string, IReadOnlySet<string>>>? swappedColumns = null)
     {
+        // The columns an enum type's swap moves (G-191) are retyped as surely as a table alter's, and what uses them is in the way the same.
+        var swapped = swappedColumns?.ToArray() ?? [];
         // A view whose output columns change in a way CREATE OR REPLACE VIEW can't make is itself dropped and recreated (G-104); one whose columns are
         // only renamed, with columns perhaps added after them, is renamed and replaced in place (G-276).
         var reshapedViews = modifiedChanges
@@ -43,12 +49,20 @@ public sealed partial class ScriptGenerator
         }
 
         var changedColumns = new Dictionary<string, IReadOnlySet<string>>(PgProj.Parser.SqlIdentifiers.NameComparer);
+        foreach (var (table, columns) in swapped)
+        {
+            changedColumns[table] = changedColumns.TryGetValue(table, out var already)
+                ? already.Concat(columns).ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer)
+                : columns;
+        }
         foreach (var modified in modifiedChanges)
         {
             if (modified.OldNode is TableDefinition oldTable && modified.NewNode is TableDefinition newTable
                 && ColumnsChangedUnderDependents(oldTable, newTable) is { Count: > 0 } columns)
             {
-                changedColumns[modified.NodeId] = columns;
+                changedColumns[modified.NodeId] = changedColumns.TryGetValue(modified.NodeId, out var swappedHere)
+                    ? swappedHere.Concat(columns).ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer)
+                    : columns;
             }
         }
 
@@ -222,7 +236,7 @@ public sealed partial class ScriptGenerator
         => change.OldNode is TypeDefinition { DomainBaseType: not null } oldType && change.NewNode is TypeDefinition { DomainBaseType: not null } newType
             && !CollationNames.Same(oldType.DomainCollationName, newType.DomainCollationName);
 
-    private static SqlOperation BlockedChangedObject(ModifiedChange change, IReadOnlyList<string> users)
+    private static SqlOperation BlockedChangedObject(ModifiedChange change, IReadOnlyList<string> users, string? swapRefusal = null)
     {
         var userList = string.Join(", ", users.Take(5)) + (users.Count > 5 ? $" and {users.Count - 5} more" : string.Empty);
         if (IsDomainCollationChange(change))
@@ -238,13 +252,16 @@ public sealed partial class ScriptGenerator
 
         if (change.NewNode is TypeDefinition)
         {
-            // PostgreSQL has no ALTER TYPE ... DROP VALUE and no way to reorder labels; only inserting a label (ADD VALUE) is done in place (G-183).
+            // PostgreSQL has no ALTER TYPE ... DROP VALUE and no way to reorder labels; only inserting a label (ADD VALUE) is done in place (G-183). pgproj
+            // rebuilds the type under table columns (G-191); what is refused here is the rest.
             return new BlockedOperation
             {
                 NodeId = change.NodeId,
                 NodeKind = change.NodeKind,
-                Message = $"The enum type {change.NodeId} loses or reorders a label, but PostgreSQL cannot do that in place and refuses to drop a type that {userList} use{(users.Count == 1 ? "s" : string.Empty)}. "
-                    + "pgproj does not rebuild what uses it: create the type under a new name, change those columns to it (ALTER COLUMN ... TYPE ... USING column::text::new_type), drop the old type, and rename the new one. Adding a label is done in place.",
+                Message = $"The enum type {change.NodeId} loses or reorders a label, which PostgreSQL cannot do in place, so pgproj rebuilds the type under the columns that use it; "
+                    + $"it cannot here: {swapRefusal ?? $"{userList} use{(users.Count == 1 ? "s" : string.Empty)} it"}. "
+                    + "Change that use first, or make the change by hand: rename the type, create the new one, change the columns to it (ALTER COLUMN ... TYPE ... USING column::text::new_type), and drop the old type. "
+                    + "Adding a label, and renaming one marked -- @renamed-label: old -> new above the CREATE TYPE, are done in place.",
             };
         }
 

@@ -11,6 +11,7 @@
 - a dropped materialized view (its computed data is lost until it is refreshed), including one dropped to be rebuilt around a change to what it uses;
 - a dropped extension (every object it owns is dropped with it);
 - a dropped field of a composite type (`ALTER TYPE ... DROP ATTRIBUTE`; the values it holds in stored rows are lost);
+- a label removed from an enum type that columns use (the type is rebuilt under them; a row that holds the label stops the publish, [enum types](enum-types.md));
 - a dropped cast, operator, aggregate, rule, publication, or event trigger that the script does not create again (one that is changed is dropped and created again, which loses nothing);
 - a revoked grant or role membership (a genuine `REVOKE`, not a narrower re-grant), unless `excludeGrants`/`excludeRoleMemberships` leaves it out of the model;
 - a changed owner of an existing object, since the old owner loses the privileges it had as the owner (setting the owner of a new object is not destructive).

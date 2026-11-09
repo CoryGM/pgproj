@@ -79,10 +79,94 @@ internal static class TypeStatementReader
         return fields;
     }
 
-    public static TypeNode? ReadEnumType(JsonElement element, string statementSql)
+    public static TypeNode? ReadEnumType(JsonElement element, string statementSql, string commentLinesBefore = "")
         => ReadTypeNodeFromNameParts(element, "typeName", statementSql) is { } type
-            ? type with { Form = "enum", EnumLabels = ReadEnumLabels(element) }
+            ? type with { Form = "enum", EnumLabels = ReadEnumLabels(element), EnumLabelRenames = ReadLabelRenames(commentLinesBefore + '\n' + statementSql) }
             : null;
+
+    /// <summary>
+    /// The lines of <paramref name="sql"/> just above the statement at <paramref name="statementOffset"/> that are blank or <c>--</c> comments, nearest last,
+    /// as text (G-191): where a statement's annotations are written. Only those few lines are read, from the statement backwards.
+    /// </summary>
+    internal static string CommentLinesBefore(string sql, int statementOffset)
+    {
+        if (statementOffset <= 0 || statementOffset > sql.Length)
+        {
+            return string.Empty;
+        }
+
+        // The part of the statement's own line before it must be blank, or the lines above belong to something else on this line.
+        var lineStart = statementOffset;
+        while (lineStart > 0 && sql[lineStart - 1] != '\n')
+        {
+            if (!char.IsWhiteSpace(sql[lineStart - 1]))
+            {
+                return string.Empty;
+            }
+
+            lineStart--;
+        }
+
+        // Each line above, nearest first: [start, end) is the line without its newline.
+        var lines = new List<string>();
+        var end = lineStart - 1;
+        while (end >= 0)
+        {
+            var start = end == 0 ? 0 : sql.LastIndexOf('\n', end - 1) + 1;
+            var line = sql[start..end].Trim();
+            if (line.Length > 0 && !line.StartsWith("--", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            lines.Insert(0, line);
+            end = start - 1;
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private const string RenamedLabelMarker = "@renamed-label:";
+
+    /// <summary>
+    /// The <c>-- @renamed-label: old -> new</c> annotations on the comment lines before the statement's first line of SQL (G-191, the user's decision of
+    /// 2026-11-09), one per line. A label is written as it is, or in single quotes (<c>'on hold' -> 'paused'</c>, a quote doubled inside), and is exact,
+    /// as PostgreSQL compares labels. A line that does not have a label on each side of <c>-&gt;</c> is not an annotation.
+    /// </summary>
+    internal static IReadOnlyList<EnumLabelRename> ReadLabelRenames(string statementSql)
+    {
+        var renames = new List<EnumLabelRename>();
+        foreach (var rawLine in statementSql.Split('\n'))
+        {
+            var line = rawLine.Trim().TrimEnd('\r').Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (!line.StartsWith("--", StringComparison.Ordinal))
+            {
+                break; // the statement itself: an annotation is only above it
+            }
+
+            var body = line[2..].Trim();
+            if (!body.StartsWith(RenamedLabelMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var parts = body[RenamedLabelMarker.Length..].Split("->", 2, StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && Label(parts[0]) is { Length: > 0 } from && Label(parts[1]) is { Length: > 0 } to && from != to)
+            {
+                renames.Add(new EnumLabelRename(from, to));
+            }
+        }
+
+        return renames;
+
+        static string Label(string text)
+            => text.Length >= 2 && text[0] == '\'' && text[^1] == '\'' ? text[1..^1].Replace("''", "'", StringComparison.Ordinal) : text;
+    }
 
     /// <summary>An enum's labels (<c>vals</c>, each a <c>String</c> node), in order (G-90 part 4).</summary>
     private static IReadOnlyList<string> ReadEnumLabels(JsonElement element)
