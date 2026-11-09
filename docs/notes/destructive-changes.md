@@ -17,7 +17,7 @@
 
 This is deliberately conservative: any column type change is treated as destructive, even a widening one PostgreSQL could apply losslessly (`integer` to `bigint`), because telling a safe widening from a truncating narrowing in general needs per-type knowledge pgproj does not attempt. Rebuilding an index, a constraint, a plain view, a type, or a function, procedure, or trigger from source is not destructive, even when it is deployed as drop and create, since nothing is lost. A changed partition strategy or key is not covered by `--allow-destructive` at all: `publish` refuses it with no way to proceed.
 
-`--output`/`--dry-run` always show the full script regardless of this check. `--execute` runs the script in a single transaction, so a failure partway leaves nothing applied; a script that is only printed or written is not wrapped in one (`publish` warns so), and should be run inside a transaction (`psql --single-transaction -f deploy.sql`) to get the same guarantee (deferred).
+`--output`/`--dry-run` always show the full script regardless of this check. `--execute` runs the script in a single transaction, so a failure partway leaves nothing applied; a script that is printed or written carries the same transaction (`BEGIN;` ... `COMMIT;`), so `psql -f deploy.sql` gives the same guarantee.
 
 `publish --comments-only` deploys nothing but `COMMENT ON` statements, so this check does not apply to it ([Publishing only the comments](comments-only.md)).
 

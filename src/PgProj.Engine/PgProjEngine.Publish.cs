@@ -209,7 +209,7 @@ public sealed partial class PgProjEngine
 
         // What a printed or written script needs to bound its waits the same way (G-270); --execute sets it for its own transaction.
         var written = lockTimeout is null ? unit.Script : $"SET lock_timeout = '{lockTimeout}';{Environment.NewLine}{Environment.NewLine}{unit.Script}";
-        var hasStatements = SqlStatementSplitter.Split(unit.Script).Count > 0;
+        var hasStatements = unit.HasStatements;
         var warnings = new List<PublishNotice>();
         var refusals = new List<PublishNotice>();
 
@@ -231,15 +231,15 @@ public sealed partial class PgProjEngine
             EngineEventKind.Compared,
             null,
             0,
-            $"Compared the project with the live database: {changeSet.Added.Count} added, {changeSet.Removed.Count} removed, {changeSet.Modified.Count} modified; {SqlStatementSplitter.Split(unit.Script).Count} statement(s) in the script."));
+            $"Compared the project with the live database: {changeSet.Added.Count} added, {changeSet.Removed.Count} removed, {changeSet.Modified.Count} modified; {unit.StatementCount} statement(s) in the script."));
 
         progress?.Report(new EngineEvent(EngineEventKind.ScriptPlanned, Script: written));
 
-        // The script pgproj writes or prints is a bare sequence of statements; only --execute runs it in a transaction (G-165, deferred by the user). A shell that
-        // runs the script and does not keep it leaves this out.
-        if (hasStatements)
+        // The script pgproj writes or prints carries its own transaction (G-165); only its --concurrently part runs outside one, which a kept script is warned
+        // about. A shell that runs the script and does not keep it leaves this out.
+        if (unit.AfterCommit.Count > 0)
         {
-            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.NotTransactional, unit.AfterCommit.Count == 0 ? PublishTexts.ScriptNotTransactionalWarning : PublishTexts.ConcurrentScriptWarning, [], ForKeptScript: true));
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.NotTransactional, PublishTexts.ConcurrentScriptWarning, [], ForKeptScript: true));
         }
 
         // pgproj never drops a schema (G-166, the user's decision); it says which ones it is leaving behind.

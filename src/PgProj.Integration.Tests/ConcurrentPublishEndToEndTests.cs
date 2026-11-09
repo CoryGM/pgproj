@@ -57,7 +57,9 @@ public sealed class ConcurrentPublishEndToEndTests
             Assert.IsGreaterThan(0, marker, dryRun.Output);
             Assert.IsGreaterThan(marker, dryRun.Output.IndexOf("CREATE INDEX CONCURRENTLY \"t_email_lower\"", StringComparison.Ordinal), dryRun.Output);
             Assert.IsLessThan(marker, dryRun.Output.IndexOf("NOT VALID;", StringComparison.Ordinal), dryRun.Output);
-            StringAssert.Contains(dryRun.Output, "psql --single-transaction would make CREATE INDEX CONCURRENTLY fail");
+            // G-165: the transaction is in the script, its COMMIT before the marker; the warning advises ON_ERROR_STOP (it advised --single-transaction before).
+            Assert.IsLessThan(marker, dryRun.Output.IndexOf("COMMIT;", StringComparison.Ordinal), dryRun.Output);
+            StringAssert.Contains(dryRun.Output, "Run the script with psql -v ON_ERROR_STOP=1 -f <file>");
             Assert.AreEqual("0", await ScalarTextAsync(connectionString, "SELECT count(*)::text FROM pg_indexes WHERE indexname = 't_email_lower'"), "a dry run runs nothing");
 
             var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--concurrently", "--execute", "--lock-timeout", "5s");

@@ -10,24 +10,20 @@ namespace PgProj.Engine;
 internal static class PublishTexts
 {
     /// <summary>
-    /// The script pgproj writes (<c>--output</c>) or prints (<c>--dry-run</c>, or no <c>--execute</c>) is not wrapped in a transaction, so a client other
-    /// than <c>pgproj publish --execute</c> that fails partway leaves the schema half-migrated (G-165, #16, deferred by the user: the warning is the resolution).
-    /// </summary>
-    public const string ScriptNotTransactionalWarning =
-        "Warning: the script is not wrapped in a transaction; run it inside one (psql --single-transaction -f <file>) or with pgproj publish --execute, which runs it in a single transaction, so a failure partway leaves nothing applied.";
-
-    /// <summary>
-    /// The warning for a printed or written <c>--concurrently</c> script (G-271): its second part cannot run in a transaction block, so
-    /// <c>psql --single-transaction</c>, the advice of <see cref="ScriptNotTransactionalWarning"/>, would make it fail.
+    /// The warning for a printed or written <c>--concurrently</c> script (G-271): the script carries its transaction (G-165), but the statements below the
+    /// marker cannot run in a transaction block, so they run after it commits, and a client that goes on after an error would run them after a failed one.
     /// </summary>
     public const string ConcurrentScriptWarning =
-        "Warning: the script is not wrapped in a transaction. Run the part above the line \"" + ConcurrentPublishPlan.Marker + "\" inside one, and the part below it without one, " +
-        "one statement at a time (psql --single-transaction would make CREATE INDEX CONCURRENTLY fail); or use pgproj publish --execute --concurrently, which does both.";
+        "Warning: the statements below the line \"" + ConcurrentPublishPlan.Marker + "\" run outside the script's transaction, after its COMMIT, one at a time. "
+        + "Run the script with psql -v ON_ERROR_STOP=1 -f <file>, so they are not run after a failed transaction; or use pgproj publish --execute --concurrently.";
 
-    /// <summary>A printed or written script for tenants: each part is meant to be its own transaction, which <c>--execute</c> does.</summary>
+    /// <summary>
+    /// A printed or written script for tenants (G-290): each part carries a transaction of its own (G-165), as <c>--execute</c> runs them, so a part that
+    /// fails leaves the parts before it committed, and a client that goes on after an error runs the parts after it.
+    /// </summary>
     public const string TenantScriptWarning =
-        "Warning: the script is not wrapped in transactions. pgproj publish --execute runs the shared part, then each tenant's part (after its \"-- pgproj: tenant\" line), in a transaction of its own; "
-        + "run each part inside one yourself (BEGIN; ... COMMIT;) if you run the script with psql.";
+        "Warning: the shared part and each tenant's part (after its \"-- pgproj: tenant\" line) are transactions of their own, as pgproj publish --execute runs them: "
+        + "a part that fails is rolled back and leaves the parts before it committed. Run the script with psql -v ON_ERROR_STOP=1 -f <file>, so it stops at the part that fails.";
 
     /// <summary>A duration PostgreSQL's <c>lock_timeout</c> accepts: a number with an optional unit (<c>us</c>, <c>ms</c>, <c>s</c>, <c>min</c>, <c>h</c>, <c>d</c>), milliseconds without one (G-270).</summary>
     public static bool IsDuration(string value)

@@ -6,6 +6,19 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+### Commands
+
+- **The script `publish` prints or writes is atomic:** it starts with `BEGIN;` and ends with `COMMIT;`, so `psql -f deploy.sql` applies all of it or,
+  when a statement fails, none of it, as `--execute` does. The warning that it was not wrapped in a transaction is gone, and so is the advice to use
+  `psql --single-transaction`, which now only adds warnings. A `SET lock_timeout` comes before the `BEGIN`. With `--concurrently`, its statements come
+  after the `COMMIT`; with tenants, each part is a transaction of its own; for both, `publish` advises `psql -v ON_ERROR_STOP=1 -f`. `--execute` is
+  unchanged.
+
+### Library
+
+- **`PublishResult.Script` and `PublishPart.Script` carry `BEGIN;` and `COMMIT;`**; `PublishPart.TransactionalScript` stays without them, for a program
+  that runs it in a transaction of its own. `PublishNoticeKind.NotTransactional` is now raised only for a `--concurrently` script or one with tenants.
+
 ## [0.2.1] - 2026-10-23
 
 ### Installing

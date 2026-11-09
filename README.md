@@ -178,12 +178,17 @@ pgproj publish --dry-run --quiet
 ```
 
 ```sql
+BEGIN;
+
 ALTER TABLE "public"."customer" ADD COLUMN "created_at" timestamptz NOT NULL DEFAULT now();
 
 CREATE INDEX "customer_name_idx" ON "public"."customer" USING btree ("name");
+
+COMMIT;
 ```
 
-pgproj wrote the `ALTER` for you. `pgproj publish --execute` applies it. If you now delete the `name` column from the file, `publish --execute` refuses,
+pgproj wrote the `ALTER` for you. `pgproj publish --execute` applies it; so does `psql -f` with the script saved by `--output`, all of it or, if a
+statement fails, none of it. If you now delete the `name` column from the file, `publish --execute` refuses,
 because the column's data would be lost:
 
 ```text

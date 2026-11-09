@@ -60,4 +60,16 @@ public static class PostgresContainerFixture
         var result = await s_container!.ExecAsync(["sh", "-c", $"mkdir -p {path} && chown postgres:postgres {path} && chmod 700 {path}"]);
         Assert.AreEqual(0, result.ExitCode, result.Stderr);
     }
+
+    /// <summary>
+    /// Runs a script as a user of pgproj would, with the server's own <c>psql -f</c> inside the container (G-165): the script is copied in, run against
+    /// <paramref name="databaseName"/> with <paramref name="psqlOptions"/> (none, or <c>-v ON_ERROR_STOP=1</c>), and its exit code and output returned.
+    /// </summary>
+    public static async Task<(long ExitCode, string Output)> RunPsqlFileAsync(string databaseName, string script, params string[] psqlOptions)
+    {
+        var path = $"/tmp/pgproj-{Guid.NewGuid():N}.sql";
+        await s_container!.CopyAsync(System.Text.Encoding.UTF8.GetBytes(script), path);
+        var result = await s_container.ExecAsync(["psql", "-U", "postgres", "-d", databaseName, .. psqlOptions, "-f", path]);
+        return ((long?)result.ExitCode ?? -1, result.Stdout + result.Stderr);
+    }
 }

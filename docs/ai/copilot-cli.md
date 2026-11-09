@@ -43,7 +43,9 @@ Copilot must preserve:
   different meaning per command; do not conflate them)
 - -o (short alias for `init --output`)
 - --execute
-- --dry-run
+- --dry-run (with `--output`, and `publish` without `--execute`: the script printed or written carries its own transaction, `BEGIN;` ... `COMMIT;`, after a
+  `SET lock_timeout` and the superuser comment, before the `--concurrently` marker, one per part with tenants; `--execute` runs the same statements in a
+  transaction it opens and is unchanged; a plain script is no longer warned about — G-165, the user's design of 2026-11-09)
 - --force (`init`'s overwrite-safety opt-in)
 - --name (`init`'s generated-project-name override)
 - --allow-destructive (`publish`'s destructive-change opt-in, G-35)

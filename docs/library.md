@@ -209,6 +209,10 @@ diagnostics there, so they appear before a slow live read.
 `PublishAsync` is what `pgproj publish` does, in one of two modes. `PublishMode.Plan` (the default) builds, compares, writes the script, and runs every check,
 and changes nothing: what `--dry-run` and `--output` do. `PublishMode.Execute` does the same and then runs the script, as `--execute` does.
 
+`PublishResult.Script`, and each part's `Script`, is the script as `pgproj publish` prints and writes it: each transaction between `BEGIN;` and `COMMIT;`,
+so it can be run as it is (`psql -f`). A program that runs a part in a transaction it opens itself uses the part's `TransactionalScript`, which has no
+`BEGIN` or `COMMIT`, and then its `AfterCommit` steps, outside a transaction, one at a time.
+
 ```csharp
 var engine = new PgProjEngine();
 var plan = await engine.PublishAsync(

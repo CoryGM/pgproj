@@ -25,8 +25,9 @@ public sealed class TablespaceEndToEndTests
             Assert.AreEqual(0, dryRun.ExitCode, dryRun.Output);
             StringAssert.Contains(dryRun.Output, "Warning: the project's tables name tablespaces the server does not have, so this script cannot run on it:");
             StringAssert.Contains(dryRun.Output, "tablespace \"g151_missing\", named by app.t, app.u");
-            // G-165 (deferred): a script that is only shown is not wrapped in a transaction, and the run says so.
-            StringAssert.Contains(dryRun.Output, "Warning: the script is not wrapped in a transaction; run it inside one (psql --single-transaction -f <file>) or with pgproj publish --execute");
+            // G-165: a script that is only shown carries its transaction, and the run no longer warns that it does not.
+            StringAssert.Contains(dryRun.Output, "BEGIN;");
+            Assert.DoesNotContain("not wrapped in a transaction", dryRun.Output);
 
             var refused = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
             Assert.AreEqual(1, refused.ExitCode, refused.Output);

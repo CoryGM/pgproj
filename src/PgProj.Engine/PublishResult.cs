@@ -75,7 +75,10 @@ public enum PublishNoticeKind
     /// <summary>A schema the database has that the project no longer uses is left in place (G-166). A warning.</summary>
     UndroppedSchema,
 
-    /// <summary>A script that is printed or written is not wrapped in a transaction. A warning.</summary>
+    /// <summary>
+    /// Part of a script that is printed or written runs outside its transaction: the <c>--concurrently</c> statements after its <c>COMMIT</c>, or, for a
+    /// project with tenants, each part in a transaction of its own (G-165: the script itself carries <c>BEGIN</c> and <c>COMMIT</c>). A warning.
+    /// </summary>
     NotTransactional,
 
     /// <summary>Schemas named as tenants' that the tenant list no longer includes are left as they are (G-290). A warning.</summary>
@@ -124,13 +127,16 @@ public sealed record PublishPart
     /// <summary>What differs in this part.</summary>
     public ChangeSet Changes { get; init; } = new() { Added = [], Removed = [], Modified = [] };
 
-    /// <summary>The script the transaction runs.</summary>
+    /// <summary>The script the transaction runs, without <c>BEGIN</c> and <c>COMMIT</c>: for a program that runs it in a transaction it opens itself.</summary>
     public string TransactionalScript { get; init; } = string.Empty;
 
     /// <summary>The statements <c>--concurrently</c> runs after the commit, one at a time.</summary>
     public IReadOnlyList<PublishStep> AfterCommit { get; init; } = [];
 
-    /// <summary>The whole script as printed or written: the transaction's, then the <c>--concurrently</c> part after its marker line.</summary>
+    /// <summary>
+    /// The whole script as printed or written: the transaction's statements between <c>BEGIN;</c> and <c>COMMIT;</c> (G-165), then the <c>--concurrently</c>
+    /// part after its marker line.
+    /// </summary>
     public string Script { get; init; } = string.Empty;
 
     /// <summary>The statements in it only a superuser can run, one line each.</summary>
@@ -213,8 +219,9 @@ public sealed record PublishResult
     public IReadOnlyList<PublishNotice> Refusals { get; init; } = [];
 
     /// <summary>
-    /// The whole script as printed or written: for a project with tenants, the shared part and each tenant's under a line naming it; with a lock timeout, starting
-    /// with <c>SET lock_timeout</c>. Empty when there is nothing to run.
+    /// The whole script as printed or written, each part's transaction between <c>BEGIN;</c> and <c>COMMIT;</c> (G-165): for a project with tenants, the shared
+    /// part and each tenant's under a line naming it; with a lock timeout, starting with <c>SET lock_timeout</c>, before the first <c>BEGIN</c>. Empty when
+    /// there is nothing to run.
     /// </summary>
     public string Script { get; init; } = string.Empty;
 

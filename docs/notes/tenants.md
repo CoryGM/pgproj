@@ -389,20 +389,28 @@ the next tenant starts.
 **A printed or written script** (`--dry-run`, `--output`) has the shared part, then each tenant's part after a line naming it:
 
 ```sql
+BEGIN;
+
 SET search_path TO platform, public;
 
 CREATE TABLE "platform"."plans" ( ... );
 
+COMMIT;
+
 -- pgproj: tenant tenant_acme (a transaction of its own)
+BEGIN;
+
 SET search_path TO tenant_acme, platform, public;
 
 CREATE SCHEMA IF NOT EXISTS "tenant_acme";
 
 ALTER TABLE "tenant_acme"."customers" ADD COLUMN "email" text;
+
+COMMIT;
 ```
 
-It is not wrapped in transactions, and `publish` warns so: `--execute` runs each part in its own; if you run the script with `psql`, wrap each part in
-`BEGIN; ... COMMIT;`.
+Each part is a transaction of its own, as `--execute` runs them, so a part that fails is rolled back and leaves the parts before it published.
+`publish` warns so: run the script with `psql -v ON_ERROR_STOP=1 -f deploy.sql`, which stops at the part that fails; publishing again does the rest.
 
 **A former tenant** (no longer listed by the query or the file) is never dropped, nor anything in it; `publish` warns, as `diff` does, that it must be
 dropped by other means.

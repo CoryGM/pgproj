@@ -133,9 +133,13 @@ public sealed class PublishAsyncTests
     [TestMethod]
     public void TheWordsOfTheChecksAreWhatPublishHasAlwaysSaid()
     {
-        StringAssert.StartsWith(PublishTexts.ScriptNotTransactionalWarning, "Warning: the script is not wrapped in a transaction;");
+        // Since G-165 a printed or written script carries its transaction: only the --concurrently part and the tenants' separate parts are warned about.
         StringAssert.Contains(PublishTexts.ConcurrentScriptWarning, ConcurrentPublishPlan.Marker);
+        StringAssert.Contains(PublishTexts.ConcurrentScriptWarning, "ON_ERROR_STOP=1");
         StringAssert.Contains(PublishTexts.TenantScriptWarning, "-- pgproj: tenant");
+        StringAssert.Contains(PublishTexts.TenantScriptWarning, "ON_ERROR_STOP=1");
+        Assert.IsFalse(PublishTexts.ConcurrentScriptWarning.Contains("single-transaction", StringComparison.Ordinal), "psql --single-transaction is no longer advised");
+        Assert.IsFalse(PublishTexts.TenantScriptWarning.Contains("single-transaction", StringComparison.Ordinal), "psql --single-transaction is no longer advised");
 
         var features = new[] { new ServerFeature(99, "a thing") };
         StringAssert.StartsWith(PublishTexts.DescribeNewerThanServer(features, 16, executing: false), "Warning: the project uses features the server (PostgreSQL 16) does not have");
@@ -174,7 +178,10 @@ public sealed class PublishAsyncTests
         var unit = Plan(project, DatabaseModel.Empty, wanted, label: null, commentsOnly: false, concurrently: false);
 
         StringAssert.Contains(unit.Script, "CREATE TABLE");
-        Assert.AreEqual(unit.TransactionalScript, unit.Script);
+        // G-165: the printed or written script is the transaction's, between BEGIN and COMMIT; --execute runs TransactionalScript in one it opens.
+        var nl = Environment.NewLine;
+        Assert.AreEqual($"BEGIN;{nl}{nl}{unit.TransactionalScript.TrimEnd()}{nl}{nl}COMMIT;{nl}", unit.Script);
+        Assert.DoesNotContain("BEGIN;", unit.TransactionalScript);
         Assert.IsEmpty(unit.AfterCommit);
         Assert.IsEmpty(unit.SuperuserStatements);
         Assert.IsTrue(unit.HasStatements);
@@ -189,6 +196,74 @@ public sealed class PublishAsyncTests
         var unit = Plan(Project(), wanted, wanted, label: null, commentsOnly: false, concurrently: false);
 
         Assert.IsFalse(unit.HasStatements);
+        Assert.AreEqual(0, unit.StatementCount);
+        Assert.DoesNotContain("BEGIN", unit.Script, "a script with nothing to run gets no transaction (G-165)");
+    }
+
+    [TestMethod]
+    public void TheStatementCountLeavesOutTheScriptsBeginAndCommit()
+    {
+        var wanted = Build("CREATE SCHEMA s; CREATE TABLE s.t (id int PRIMARY KEY);");
+
+        var unit = Plan(Project(), DatabaseModel.Empty, wanted, label: null, commentsOnly: false, concurrently: false);
+
+        Assert.AreEqual(SqlStatementSplitter.Split(unit.TransactionalScript).Count, unit.StatementCount);
+        Assert.AreEqual(unit.StatementCount + 2, SqlStatementSplitter.Split(unit.Script).Count, "the script adds only BEGIN and COMMIT");
+    }
+
+    [TestMethod]
+    public void ConcurrentlyPutsItsStatementsAfterTheScriptsCommit()
+    {
+        var live = Build("CREATE SCHEMA s; CREATE TABLE s.t (id int, v int);");
+        var wanted = Build("CREATE SCHEMA s; CREATE TABLE s.t (id int, v int, w int); CREATE INDEX t_v_idx ON s.t (v);");
+
+        var unit = Plan(Project(), live, wanted, label: null, commentsOnly: false, concurrently: true);
+
+        var statements = SqlStatementSplitter.Split(unit.Script);
+        var commit = statements.ToList().FindIndex(static s => s.Trim() == "COMMIT;" || s.Trim() == "COMMIT");
+        Assert.AreEqual("BEGIN", statements[0].Trim().TrimEnd(';'), "the transaction opens the script");
+        Assert.IsGreaterThan(0, commit);
+        Assert.IsTrue(unit.Script.IndexOf("COMMIT;", StringComparison.Ordinal) < unit.Script.IndexOf(ConcurrentPublishPlan.Marker, StringComparison.Ordinal), "the marker follows the COMMIT");
+        StringAssert.Contains(statements[^1], "CREATE INDEX CONCURRENTLY", "the concurrent statement is last, outside the transaction");
+        Assert.AreEqual(unit.StatementCount + 2, statements.Count);
+    }
+
+    [TestMethod]
+    public void ATenantsSearchPathIsInsideItsTransaction()
+    {
+        var wanted = Build("CREATE SCHEMA tenant_acme; CREATE TABLE tenant_acme.t (id int);");
+
+        var unit = Plan(Project(), DatabaseModel.Empty, wanted, label: "tenant_acme", commentsOnly: false, concurrently: false, searchPath: ["tenant_acme", "public"]);
+
+        var nl = Environment.NewLine;
+        StringAssert.StartsWith(unit.Script, $"BEGIN;{nl}{nl}SET search_path TO tenant_acme, public;");
+        StringAssert.EndsWith(unit.Script, $"COMMIT;{nl}");
+    }
+
+    [TestMethod]
+    public void TheSuperuserCommentHeadsTheScriptBeforeItsBegin()
+    {
+        var wanted = Build("CREATE FUNCTION f() RETURNS event_trigger LANGUAGE plpgsql AS $$ BEGIN END $$; CREATE EVENT TRIGGER e ON ddl_command_start EXECUTE FUNCTION f();");
+
+        var unit = Plan(Project(), DatabaseModel.Empty, wanted, label: null, commentsOnly: false, concurrently: false);
+
+        StringAssert.StartsWith(unit.Script, "-- pgproj: this script has statements that only a superuser can run");
+        Assert.IsTrue(unit.Script.IndexOf("--   ", StringComparison.Ordinal) < unit.Script.IndexOf("BEGIN;", StringComparison.Ordinal), "the comment comes first");
+        Assert.AreEqual("BEGIN", SqlStatementSplitter.Split(unit.Script)[0].Split('\n').Last(static line => line.Trim().Length > 0).Trim().TrimEnd(';'));
+    }
+
+    [TestMethod]
+    public void CommentsOnlyIsOneTransaction()
+    {
+        var live = Build("CREATE SCHEMA s; CREATE TABLE s.t (id int);");
+        var wanted = Build("CREATE SCHEMA s; CREATE TABLE s.t (id int); COMMENT ON TABLE s.t IS 'orders';");
+
+        var unit = Plan(Project(), live, wanted, label: null, commentsOnly: true, concurrently: false);
+
+        var nl = Environment.NewLine;
+        StringAssert.StartsWith(unit.Script, $"BEGIN;{nl}");
+        StringAssert.EndsWith(unit.Script, $"COMMIT;{nl}");
+        StringAssert.Contains(unit.Script, "COMMENT ON TABLE");
     }
 
     [TestMethod]

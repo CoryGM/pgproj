@@ -91,11 +91,11 @@ public static class PublishCommand
 
                 Printing, saving, or running the script:
                   - By default the script is printed to the console. Use --output to save it to a file, and --execute to run it directly against the database (use --dry-run to preview without running it).
-                  - --execute runs the script in a single transaction; a script that is printed or written is not wrapped in one (a warning says so), so run it inside a transaction yourself (psql --single-transaction -f <file>).
+                  - --execute runs the script in a single transaction. A script that is printed or written carries the same transaction (BEGIN; ... COMMIT;), so psql -f <file> applies all of it or, when a statement fails, none of it; do not add psql's --single-transaction.
                   - --execute refuses to run a script that can discard data unless --allow-destructive is also given.
                   - Before anything runs, a warning names each change that rewrites, scans, or blocks writes to a table that already exists (a column type change, SET NOT NULL, a new index or constraint, SET ACCESS METHOD, ...), which on a large table holds its lock for as long as it takes.
                   - --lock-timeout <duration> bounds how long each statement waits for a lock: past it, the script is rolled back and the statement named, instead of the publish stalling everything behind it.
-                  - --concurrently moves the slow part of new indexes and constraints on tables that already exist out of the transaction: after it commits, each index is built with CREATE INDEX CONCURRENTLY (on a partitioned table: created ON ONLY the parent, then built on each partition and attached), a changed index is built under a temporary name and swapped in, and each new foreign key or CHECK constraint, added NOT VALID in the transaction, is validated. These statements run one at a time, each on its own; a failed one has what it built dropped, is named with the error, and the next publish --concurrently does the rest. A printed or written script has them after a line that says so; run the part above it in one transaction and the part below it without one.
+                  - --concurrently moves the slow part of new indexes and constraints on tables that already exist out of the transaction: after it commits, each index is built with CREATE INDEX CONCURRENTLY (on a partitioned table: created ON ONLY the parent, then built on each partition and attached), a changed index is built under a temporary name and swapped in, and each new foreign key or CHECK constraint, added NOT VALID in the transaction, is validated. These statements run one at a time, each on its own; a failed one has what it built dropped, is named with the error, and the next publish --concurrently does the rest. A printed or written script has them after its COMMIT, below a line that says so; run it with psql -v ON_ERROR_STOP=1 -f <file>, so they are not run after a failed transaction.
                   - An index PostgreSQL marks INVALID (left by a failed CREATE INDEX CONCURRENTLY) is rebuilt: concurrently with --concurrently, in the transaction without it.
                   - --execute refuses a script with statements only a superuser can run (an event trigger; ALTER TABLE ... TRIGGER ALL on foreign-key triggers; a LEAKPROOF routine or one in an untrusted language such as c) unless --allow-superuser-statements is also given, and then refuses a connected role that is not a superuser, before running anything. A printed or written script starts with a comment naming them, and a warning says so.
                   - --execute refuses a script estimated to need more locks than the server's lock table holds (max_locks_per_transaction * (max_connections + max_prepared_transactions); one transaction keeps every relation it changes locked until it commits) unless --allow-lock-limit is also given; from 80% of it, publish warns, and a printed or written script is only warned about.
@@ -316,10 +316,7 @@ public static class PublishCommand
     /// <summary>A duration PostgreSQL's <c>lock_timeout</c> accepts (G-270); the engine decides.</summary>
     internal static bool IsDuration(string value) => PublishTexts.IsDuration(value);
 
-    /// <summary>The warning for a script that is printed or written without a transaction (G-165); the engine words it.</summary>
-    internal const string ScriptNotTransactionalWarning = PublishTexts.ScriptNotTransactionalWarning;
-
-    /// <summary>The same for a <c>--concurrently</c> script (G-271).</summary>
+    /// <summary>The warning for a printed or written <c>--concurrently</c> script, whose last part runs outside its transaction (G-271, G-165); the engine words it.</summary>
     internal const string ConcurrentScriptWarning = PublishTexts.ConcurrentScriptWarning;
 
     private static Option<string> CreateProjectOption()

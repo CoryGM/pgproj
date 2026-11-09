@@ -255,8 +255,11 @@ and an object in the way of a change (a view on a column whose type changes, say
   relation it changes locked until it commits, and PostgreSQL would fail partway with `out of shared memory`. See [Locks and large tables](notes/locks.md).
 - **Statements only a superuser can run are refused** unless you add `--allow-superuser-statements` and connect as a superuser. See
   [Statements only a superuser can run](notes/superuser-statements.md).
-- **A printed or written script is not wrapped in a transaction**, and `publish` warns so. Run it inside one yourself
-  (`psql --single-transaction -f deploy.sql`), or use `--execute`.
+- **A printed or written script carries its transaction:** it starts with `BEGIN;` and ends with `COMMIT;` (a `SET lock_timeout` from `--lock-timeout`
+  comes before the `BEGIN`), so `psql -f deploy.sql` applies all of it or, when a statement fails, none of it, as `--execute` does. Do not add psql's
+  `--single-transaction`. The `--concurrently` statements come after the `COMMIT`, and a project with tenants has a transaction per part: for those,
+  `publish` warns and advises `psql -v ON_ERROR_STOP=1 -f deploy.sql`, so psql stops at the first error. A pre- or post-deploy script must not end
+  the transaction itself (`COMMIT`, `ROLLBACK`).
 - **A project with tenants is published in parts:** the shared changes in one transaction, then each tenant in a transaction of its own, a new tenant's
   schema created first; every part is checked before anything runs, and a failure stops the run and says what was published (see
   [Schema-per-tenant databases](notes/tenants.md#deploying-publish)).
