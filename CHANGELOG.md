@@ -18,11 +18,19 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   `psql --single-transaction`, which now only adds warnings. A `SET lock_timeout` comes before the `BEGIN`. With `--concurrently`, its statements come
   after the `COMMIT`; with tenants, each part is a transaction of its own; for both, `publish` advises `psql -v ON_ERROR_STOP=1 -f`. `--execute` is
   unchanged.
+- **Variables in the deploy scripts:** the project's pre- and post-deploy scripts, and a tenant's, can name a value with psql's syntax, `:'name'` or
+  `:"name"`, instead of writing it, for a password or a value that differs between environments. `publish --execute` takes it from the environment
+  variable `PGPROJ_VAR_<name>`, only in what it runs, and refuses to run when one is not set; the value is never printed and is masked in an error. A
+  printed or written script keeps the variables, and `publish` names them, so it runs with `psql -v name=value -f`. `build` checks the scripts without
+  the values. `pgproj about` lists the variables set, never their values. Before, a variable in the project's own scripts was an error, and a tenant's
+  scripts could use only `tenant_schema` and `tenant_id` ([Variables in the deploy scripts](docs/notes/variables.md)).
 
 ### Library
 
 - **`PublishResult.Script` and `PublishPart.Script` carry `BEGIN;` and `COMMIT;`**; `PublishPart.TransactionalScript` stays without them, for a program
   that runs it in a transaction of its own. `PublishNoticeKind.NotTransactional` is now raised only for a `--concurrently` script or one with tenants.
+- **`PublishRequest.Variables`** gives the deploy scripts' variables their values for `PublishMode.Execute`, and **`PublishNoticeKind.Variables`** is the
+  warning of a plan whose kept script uses variables, and the refusal of a run that lacks one.
 
 ## [0.2.1] - 2026-10-23
 

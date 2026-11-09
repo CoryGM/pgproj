@@ -49,6 +49,11 @@ public sealed partial class PgProjEngine
             return Stopped(state, PublishStatus.Refused, CompareStatus.Refused, problem);
         }
 
+        if (PublishTexts.VariablesProblem(request.Variables ?? new Dictionary<string, string>()) is { } variablesProblem)
+        {
+            return Stopped(state, PublishStatus.Refused, CompareStatus.Refused, variablesProblem);
+        }
+
         try
         {
             return await RunPublishAsync(request, state, cancellationToken);
@@ -293,6 +298,15 @@ public sealed partial class PgProjEngine
                 superuserItems));
         }
 
+        // The scripts' variables (G-336): a kept script keeps them, and --execute needs a value for each.
+        var variables = request.Variables ?? new Dictionary<string, string>();
+        var variablesUsed = PublishTexts.VariablesUsed([unit.TransactionalScript]);
+        var variablesMissing = variablesUsed.Where(name => !variables.ContainsKey(name)).ToArray();
+        if (variablesUsed.Count > 0 && !executing)
+        {
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesKept(variablesUsed), [], ForKeptScript: true));
+        }
+
         if (executing)
         {
             await RefuseAsync();
@@ -340,7 +354,7 @@ public sealed partial class PgProjEngine
 
         try
         {
-            await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, cancellationToken);
+            await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, variables, cancellationToken);
             Say(progress, EngineEventKind.ScriptExecuted, "Executed deployment script.");
             if (unit.AfterCommit.Count > 0)
             {
@@ -381,6 +395,12 @@ public sealed partial class PgProjEngine
             if (missingRoles.Count > 0)
             {
                 refusals.Add(new PublishNotice(PublishNoticeKind.MissingRole, $"Publish failed: {PublishTexts.DescribeMissingRoles(missingRoles, executing: true)}", PublishItems.Roles(PublishNoticeKind.MissingRole, missingRoles)));
+            }
+
+            // What the run cannot fill in (G-336), reported with what the server lacks.
+            if (variablesMissing.Length > 0)
+            {
+                refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesMissing(variablesMissing), []));
             }
 
             if (refusals.Count > 0)

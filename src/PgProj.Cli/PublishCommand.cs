@@ -89,6 +89,8 @@ public static class PublishCommand
 
                 A project with tenants ("tenants" in pgproj.json, a schema per tenant built from one template) is published in parts: the shared changes in one transaction, with the pre- and post-deploy scripts, then each tenant in a transaction of its own, its script starting with SET search_path TO the tenant's schema. A tenant the tenant query or file lists whose schema does not exist yet has it created. Every part is checked before anything runs; a failure stops the run, says what was published, which part failed (rolled back), and what was not started, and publishing again finishes. A schema the query or file no longer lists is never dropped: a warning says to drop it by other means. --tenants a,b publishes only those tenants. A tenant's own scripts (tenants.predeploy and tenants.postdeploy) run in its transaction, around the template's changes, with :"tenant_schema", :'tenant_schema', and :'tenant_id' filled in; a file starting with -- pgproj: run when=tenant-changed or when=tenant-created runs only then, and a file of the project's own scripts marked when=changed only when there are changes. A printed or written script has a line before each tenant's part. See docs/notes/tenants.md.
 
+                Variables in the pre- and post-deploy scripts: a script may name a value with psql's syntax, :'name' (a string) or :"name" (an identifier), instead of writing it, for a secret or a value that differs between environments. --execute fills each in from the environment variable PGPROJ_VAR_<name> (PGPROJ_VAR_app_password for :'app_password'), only in what it runs, and refuses to run when one is not set; the value is never printed, and is masked in any error. A printed or written script keeps the variables as written, and a warning names them: run it with psql -v name=value -f <file>. The server may still log a statement it runs (log_statement); see docs/notes/variables.md.
+
                 Printing, saving, or running the script:
                   - By default the script is printed to the console. Use --output to save it to a file, and --execute to run it directly against the database (use --dry-run to preview without running it).
                   - --execute runs the script in a single transaction. A script that is printed or written carries the same transaction (BEGIN; ... COMMIT;), so psql -f <file> applies all of it or, when a statement fails, none of it; do not add psql's --single-transaction.
@@ -209,6 +211,7 @@ public static class PublishCommand
                         LockTimeout = lockTimeout,
                         Concurrently = concurrently,
                         CommentsOnly = commentsOnly,
+                        Variables = ScriptVariableSettings.Read(),
                         Progress = new LogProgress(
                             log,
                             announceProjectFile: sourceConnection is not null,

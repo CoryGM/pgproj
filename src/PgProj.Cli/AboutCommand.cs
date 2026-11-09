@@ -80,7 +80,7 @@ public static class AboutCommand
                     },
                     cancellationToken);
 
-                foreach (var line in Lines(result, CliVersion(), InstallKind.Describe()))
+                foreach (var line in Lines(result, CliVersion(), InstallKind.Describe(), ScriptVariableSettings.Read().Keys.ToArray()))
                 {
                     Console.Out.WriteLine(SecretRedactor.Redact(line));
                 }
@@ -115,8 +115,13 @@ public static class AboutCommand
 
     /// <summary>The report, line by line.</summary>
     public static IEnumerable<string> Lines(AboutResult result, string cliVersion, string installKind)
+        => Lines(result, cliVersion, installKind, []);
+
+    /// <summary>The report, line by line, naming the deploy scripts' variables the environment sets (G-336), never their values.</summary>
+    public static IEnumerable<string> Lines(AboutResult result, string cliVersion, string installKind, IReadOnlyCollection<string> variableNames)
     {
         ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(variableNames);
 
         yield return $"pgproj {cliVersion}" + (result.EngineVersion == cliVersion ? string.Empty : $" (engine {result.EngineVersion})");
         yield return $"  Installed as: {installKind}";
@@ -179,6 +184,12 @@ public static class AboutCommand
         foreach (var line in Connection("Source database", result.Source))
         {
             yield return line;
+        }
+
+        if (variableNames.Count > 0)
+        {
+            yield return string.Empty;
+            yield return $"Script variables set ({ScriptVariableSettings.Prefix}<name>; values not shown): {string.Join(", ", variableNames.Order(StringComparer.Ordinal))}";
         }
 
         yield return string.Empty;

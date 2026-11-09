@@ -84,6 +84,10 @@ public sealed class DeployScriptsTests
         Assert.AreEqual((null, null), DeployScripts.ForTenant(tenants, new TenantTarget("acme", "tenant_acme", Exists: true), NoChanges, LiveWithTable("tenant_acme")));
     }
 
+    /// <summary>
+    /// G-336 (the user's design of 2026-11-09) replaces G-290e's rule that only a tenant's scripts may use variables: the project's own may use any but a
+    /// tenant's, and a tenant's may use any, the others being the environment's; neither needs a value to build.
+    /// </summary>
     [TestMethod]
     public void BuildChecksTheVariablesOfEachScript()
     {
@@ -92,8 +96,33 @@ public sealed class DeployScriptsTests
 
         var errors = DeployScripts.Check(project, new PgQueryParser()).Select(static diagnostic => diagnostic.Message).ToArray();
 
-        Assert.IsTrue(errors.Any(static message => message.StartsWith("The project's deploy script uses :'tenant_id': variables are only for a tenant's scripts", StringComparison.Ordinal)), string.Join(" | ", errors));
-        Assert.IsTrue(errors.Any(static message => message.StartsWith("A tenant's script uses :'tenant_name', which pgproj does not set", StringComparison.Ordinal)), string.Join(" | ", errors));
+        Assert.HasCount(1, errors, string.Join(" | ", errors));
+        StringAssert.StartsWith(errors[0], "The project's deploy script uses :'tenant_id': tenant_schema and tenant_id are only for a tenant's scripts");
+    }
+
+    [TestMethod]
+    public void TheProjectsScriptsMayUseTheEnvironmentsVariablesAndBuildWithoutTheirValues()
+    {
+        using var directory = new TempDirectory();
+        var project = directory.Project(
+            post: "ALTER ROLE app PASSWORD :'app_password';\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO :\"reporting_role\";\n") with { Tenants = directory.Tenants(pre: "SELECT set_config('app.region', :'region', true);\n") };
+
+        var problems = DeployScripts.Check(project, new PgQueryParser()).ToArray();
+        var syntax = DeployScriptCheck.CheckSyntax(project, file => new PgQueryParser().Parse(ScriptVariables.StandIn(file.Text))).ToArray();
+
+        Assert.IsEmpty(problems, string.Join(" | ", problems.Select(static problem => problem.Message)));
+        Assert.IsEmpty(syntax, string.Join(" | ", syntax.Select(static problem => problem.Message)));
+    }
+
+    [TestMethod]
+    public void ASyntaxErrorBesideAVariableIsReportedAtTheAuthorsPosition()
+    {
+        using var directory = new TempDirectory();
+        var project = directory.Project(post: "ALTER ROLE app PASSWORD :'app_password';\nSELEC 1;\n");
+
+        var syntax = DeployScriptCheck.CheckSyntax(project, file => new PgQueryParser().Parse(ScriptVariables.StandIn(file.Text))).Single();
+
+        Assert.AreEqual(2, syntax.Location.Line, "the stand-in keeps every position the author's");
     }
 
     private static ChangeSet OneChange()

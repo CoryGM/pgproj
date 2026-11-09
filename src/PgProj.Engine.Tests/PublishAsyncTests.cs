@@ -201,6 +201,46 @@ public sealed class PublishAsyncTests
     }
 
     [TestMethod]
+    public void ARequestsVariablesMayNotBeATenantsOrUnspellable()
+    {
+        Assert.IsNull(PublishTexts.VariablesProblem(new Dictionary<string, string> { ["app_password"] = "x", ["Region2"] = "eu" }));
+        StringAssert.Contains(PublishTexts.VariablesProblem(new Dictionary<string, string> { ["tenant_id"] = "x" })!, "set by pgproj for each tenant");
+        StringAssert.Contains(PublishTexts.VariablesProblem(new Dictionary<string, string> { ["app-password"] = "x" })!, "only letters, digits, and _");
+    }
+
+    [TestMethod]
+    public void TheVariablesNotesNameThemAndHowToRunTheScript()
+    {
+        var kept = PublishTexts.DescribeVariablesKept(["app_password", "region"]);
+        var missing = PublishTexts.DescribeVariablesMissing(["app_password"]);
+
+        StringAssert.Contains(kept, ":'app_password', :'region'");
+        StringAssert.Contains(kept, "psql -v app_password=... -v region=... -f <file>");
+        StringAssert.StartsWith(missing, "Publish failed: the script uses :'app_password', which has no value, so nothing was run.");
+        StringAssert.Contains(missing, "PGPROJ_VAR_app_password");
+        CollectionAssert.AreEqual(new[] { "app_password", "region" }, PublishTexts.VariablesUsed(["SELECT :'app_password';", "SELECT :'region', :'app_password';"]).ToArray());
+    }
+
+    [TestMethod]
+    public void AFailureMasksEveryValueAsWrittenAndAsSqlQuotesIt()
+    {
+        var failure = new PublishFailure(
+            "22023: invalid value 'it''s-s3cret' for s3cret-ish",
+            "22023",
+            "the value was it's-s3cret",
+            null,
+            "ALTER ROLE app PASSWORD :'app_password'",
+            AfterCommit: false,
+            []);
+
+        var masked = ScriptExecution.MaskValues(failure, new Dictionary<string, string> { ["app_password"] = "it's-s3cret" });
+
+        Assert.AreEqual("22023: invalid value '*****' for s3cret-ish", masked.Message);
+        Assert.AreEqual("the value was *****", masked.Detail);
+        Assert.AreEqual("ALTER ROLE app PASSWORD :'app_password'", masked.Statement, "the statement is reported as written, with its placeholder");
+    }
+
+    [TestMethod]
     public void TheStatementCountLeavesOutTheScriptsBeginAndCommit()
     {
         var wanted = Build("CREATE SCHEMA s; CREATE TABLE s.t (id int PRIMARY KEY);");

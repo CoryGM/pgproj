@@ -260,6 +260,10 @@ and an object in the way of a change (a view on a column whose type changes, say
   `--single-transaction`. The `--concurrently` statements come after the `COMMIT`, and a project with tenants has a transaction per part: for those,
   `publish` warns and advises `psql -v ON_ERROR_STOP=1 -f deploy.sql`, so psql stops at the first error. A pre- or post-deploy script must not end
   the transaction itself (`COMMIT`, `ROLLBACK`).
+- **The deploy scripts can name a value instead of writing it:** `:'name'` or `:"name"`, psql's syntax, for a password or a value per environment.
+  `--execute` takes it from the environment variable `PGPROJ_VAR_<name>`, only in what it runs, and refuses to run when one is not set; the value is
+  never printed and is masked in an error. A printed or written script keeps the variables, and `publish` names them: run it with
+  `psql -v name=value -f deploy.sql`. See [Variables in the deploy scripts](notes/variables.md).
 - **A project with tenants is published in parts:** the shared changes in one transaction, then each tenant in a transaction of its own, a new tenant's
   schema created first; every part is checked before anything runs, and a failure stops the run and says what was published (see
   [Schema-per-tenant databases](notes/tenants.md#deploying-publish)).

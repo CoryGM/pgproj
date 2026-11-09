@@ -180,6 +180,16 @@ statement PostgreSQL 18 accepts, pgproj accepts.
 
 When `publish --execute` refuses, nothing has run. `--dry-run` prints the script so you can see what it would do.
 
+### the script uses :'...', which has no value
+
+```text
+Publish failed: the script uses :'app_password', which has no value, so nothing was run. Set PGPROJ_VAR_app_password in the environment.
+```
+
+A pre- or post-deploy script names a value with psql's variable syntax, and `--execute` found no environment variable for it. Set `PGPROJ_VAR_<name>`
+(the name after the `:`, as written), or correct the name in the script. `pgproj about` lists the variables it finds. See
+[Variables in the deploy scripts](notes/variables.md).
+
 ### can discard data and were not executed
 
 ```text

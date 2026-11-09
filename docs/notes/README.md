@@ -43,6 +43,7 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Locks and large tables](locks.md) — the warning before a rewrite or a long lock, `publish --lock-timeout`, and `publish --concurrently`
 - [Entity relationship diagrams](erd.md) — `--erd`: the files, what is drawn, and a file already there
 - [Excluding grants, role memberships, and owners](excluding-grants-and-owners.md) — `excludeGrants`, `excludeRoleMemberships`, `excludeOwners`
+- [Variables in the deploy scripts](variables.md) — `:'name'` for a secret or a value per environment, from `PGPROJ_VAR_<name>`, and what the server keeps
 
 ## Cluster-wide objects and ownership
 

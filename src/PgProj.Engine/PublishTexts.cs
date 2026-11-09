@@ -25,6 +25,48 @@ internal static class PublishTexts
         "Warning: the shared part and each tenant's part (after its \"-- pgproj: tenant\" line) are transactions of their own, as pgproj publish --execute runs them: "
         + "a part that fails is rolled back and leaves the parts before it committed. Run the script with psql -v ON_ERROR_STOP=1 -f <file>, so it stops at the part that fails.";
 
+    /// <summary>The variables pgproj sets for a tenant's scripts (G-290e); the environment may not give them (G-336).</summary>
+    public static bool IsTenantVariable(string name) => name is "tenant_schema" or "tenant_id";
+
+    /// <summary>
+    /// What is wrong with a request's <see cref="PublishRequest.Variables"/> (G-336), or null: a name psql's variable syntax cannot spell (letters, digits,
+    /// and <c>_</c>), or a tenant's variable, which pgproj sets.
+    /// </summary>
+    public static string? VariablesProblem(IReadOnlyDictionary<string, string> variables)
+    {
+        ArgumentNullException.ThrowIfNull(variables);
+
+        var badNames = variables.Keys.Where(static name => name.Length == 0 || !name.All(static character => char.IsLetterOrDigit(character) || character == '_')).ToArray();
+        if (badNames.Length > 0)
+        {
+            return $"a variable's name may hold only letters, digits, and _: {string.Join(", ", badNames.Select(static name => $"\"{name}\""))}.";
+        }
+
+        var tenantNames = variables.Keys.Where(IsTenantVariable).ToArray();
+        return tenantNames.Length > 0
+            ? $"{string.Join(" and ", tenantNames)} {(tenantNames.Length == 1 ? "is" : "are")} set by pgproj for each tenant and cannot be given as a variable ({string.Join(", ", tenantNames.Select(static name => VariablePrefix + name))})."
+            : null;
+    }
+
+    /// <summary>The prefix of the environment variables the CLI reads a script's variables from (G-336): <c>PGPROJ_VAR_app_password</c> is <c>:'app_password'</c>.</summary>
+    public const string VariablePrefix = "PGPROJ_VAR_";
+
+    /// <summary>The variables the scripts of <paramref name="scripts"/> use, each once, in order (G-336); a tenant's values are already in them.</summary>
+    public static IReadOnlyList<string> VariablesUsed(IEnumerable<string> scripts)
+        => scripts.SelectMany(PgProj.Parser.ScriptVariables.Names).Distinct(StringComparer.Ordinal).ToArray();
+
+    /// <summary>The note for a printed or written script that uses variables (G-336): it keeps them, and how to run it.</summary>
+    public static string DescribeVariablesKept(IReadOnlyList<string> names)
+        => $"Warning: the script uses {Names(names)}, which only pgproj publish --execute fills in (from {VariablePrefix}<name>); the script keeps them as written. "
+            + $"Run it with psql {string.Join(" ", names.Select(static name => $"-v {name}=..."))} -f <file>.";
+
+    /// <summary>The refusal of <c>--execute</c> when a variable the script uses has no value (G-336).</summary>
+    public static string DescribeVariablesMissing(IReadOnlyList<string> missing)
+        => $"Publish failed: the script uses {Names(missing)}, which {(missing.Count == 1 ? "has" : "have")} no value, so nothing was run. "
+            + $"Set {string.Join(", ", missing.Select(static name => VariablePrefix + name))} in the environment.";
+
+    private static string Names(IReadOnlyList<string> names) => string.Join(", ", names.Select(static name => $":'{name}'"));
+
     /// <summary>A duration PostgreSQL's <c>lock_timeout</c> accepts: a number with an optional unit (<c>us</c>, <c>ms</c>, <c>s</c>, <c>min</c>, <c>h</c>, <c>d</c>), milliseconds without one (G-270).</summary>
     public static bool IsDuration(string value)
         => System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"^\d+(\.\d+)?\s*(us|ms|s|min|h|d)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);

@@ -39,6 +39,7 @@ public sealed partial class PgProjEngine
         var commentsOnly = request.CommentsOnly;
         var concurrently = request.Concurrently;
         var lockTimeout = request.LockTimeout?.Trim();
+        var variables = request.Variables ?? new Dictionary<string, string>();
         var sharedTrees = (IReadOnlyList<PgProj.Parser.SqlSyntaxTree>)[.. built.SyntaxTrees.Where(static tree => tree.SearchPath is null)];
         var serverMajor = connection.PostgreSqlVersion.Major;
         var relationNames = concurrently ? await PublishTexts.ReadRelationNamesAsync(connection, cancellationToken) : null;
@@ -226,7 +227,7 @@ public sealed partial class PgProjEngine
 
                 try
                 {
-                    await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, cancellationToken);
+                    await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, variables, cancellationToken);
                     if (unit.AfterCommit.Count > 0)
                     {
                         Say(progress, EngineEventKind.AfterCommitStarted, $"Running {unit.AfterCommit.Count} statement(s) of {PartName(unit)} outside the transaction (--concurrently):");
@@ -264,8 +265,34 @@ public sealed partial class PgProjEngine
         // The checks over the parts, in the order publish has always made them; false when one refuses.
         async Task<bool> CheckAllAsync(IReadOnlyList<PublishUnit> units, List<PublishNotice> warnings, List<PublishNotice> refusals)
             => WarnAndCheck(units, warnings, refusals)
+                && CheckVariables(units, warnings, refusals)
                 && await CheckServerAsync(units, warnings, refusals)
                 && await CheckSuperuserAsync(units, warnings, refusals);
+
+        // The scripts' variables over every part (G-336): a kept script keeps them; --execute needs a value for each, or nothing runs.
+        bool CheckVariables(IReadOnlyList<PublishUnit> units, List<PublishNotice> warnings, List<PublishNotice> refusals)
+        {
+            var used = PublishTexts.VariablesUsed(units.Select(static unit => unit.TransactionalScript));
+            if (used.Count == 0)
+            {
+                return true;
+            }
+
+            if (!executing)
+            {
+                Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesKept(used), [], ForKeptScript: true));
+                return true;
+            }
+
+            var missing = used.Where(name => !variables.ContainsKey(name)).ToArray();
+            if (missing.Length == 0)
+            {
+                return true;
+            }
+
+            refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesMissing(missing), []));
+            return false;
+        }
 
         // The script: the shared part, then each tenant with changes under a line naming it; with a lock timeout, starting with its SET.
         string ComposeScript(IReadOnlyList<PublishUnit> parts, string? timeout, List<PublishNotice> warnings)

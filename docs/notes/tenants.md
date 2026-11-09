@@ -537,8 +537,10 @@ that must follow a shared change should run on every publish and do nothing when
 
 - a marker a script does not take: an unknown value, a tenant marker in the project's own script, or `when=changed` in a tenant's;
 - two markers in one file;
-- a variable other than `tenant_schema` and `tenant_id`;
-- a variable in the project's own scripts, which run once and have no tenant.
+- `tenant_schema` or `tenant_id` in the project's own scripts, which run once and have no tenant.
+
+Any other variable, in a tenant's scripts or the project's, is one `publish --execute` takes from the environment (`PGPROJ_VAR_<name>`): see
+[Variables in the deploy scripts](variables.md).
 
 ## Troubleshooting
 
@@ -562,7 +564,7 @@ that must follow a shared change should run on every publish and do nothing when
 | `init`: `These template files have a function body that still names tenant_acme` (a warning) | Change the body to refer to the tenant's own objects without a schema. |
 | `init`: `N tenant(s) differ from the template` | `pgproj diff` shows how. Change the template, or let `publish` bring those tenants to it. |
 | `build`: `'-- pgproj: run when=changed' is not a marker a tenant's postdeploy script takes` | A tenant's file takes `when=tenant-changed` or `when=tenant-created`. |
-| `build`: `A tenant's script uses :'tenant_name', which pgproj does not set` | The variables are `tenant_schema` and `tenant_id`. |
+| `publish`: `the script uses :'tenant_name', which has no value` | A variable other than `tenant_schema` and `tenant_id` comes from `PGPROJ_VAR_<name>`: set it, or correct the name. |
 | `build`: `The project's deploy script uses :'tenant_id'` | Move that statement to `tenants.predeploy` or `tenants.postdeploy`. |
 | `publish`: every tenant `ran only their scripts` | A tenant script without a marker runs on every publish; mark it `when=tenant-changed` if it should run only with changes. |
 | `publish`: `Publish failed in tenant_globex: ...` and `Not started: ...` | Fix what the error names, then run `publish` again: it finishes the rest. |

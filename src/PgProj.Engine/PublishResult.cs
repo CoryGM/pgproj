@@ -89,6 +89,12 @@ public enum PublishNoticeKind
 
     /// <summary>The server sent a notice while the script ran, such as a comment <c>--comments-only</c> skipped (G-169). A warning, found by running.</summary>
     ServerNotice,
+
+    /// <summary>
+    /// The scripts use variables (G-336): a printed or written script keeps them, which a warning says, with how to run it; <see cref="PublishMode.Execute"/>
+    /// is refused when one has no value in <see cref="PublishRequest.Variables"/>.
+    /// </summary>
+    Variables,
 }
 
 /// <summary>One thing a warning or refusal names (G-316): an object of the model, a role, a tablespace, a feature, or a statement, so a shell can go to it.</summary>

@@ -72,6 +72,14 @@ public sealed record PublishRequest
     /// <summary>Deploy only the <c>COMMENT ON</c> statements (<c>--comments-only</c>, G-169).</summary>
     public bool CommentsOnly { get; init; }
 
+    /// <summary>
+    /// The values of the variables the pre- and post-deploy scripts use with psql's syntax, <c>:'name'</c> and <c>:"name"</c> (G-336), by name: the CLI reads
+    /// them from <c>PGPROJ_VAR_&lt;name&gt;</c>. Only <see cref="PublishMode.Execute"/> fills them in, in what it runs: the script, the messages, and every
+    /// other part of the result keep the placeholders, and a value is masked wherever a message would show it. A variable the script uses without a value
+    /// refuses <see cref="PublishMode.Execute"/>. <c>tenant_schema</c> and <c>tenant_id</c> are set by pgproj for a tenant's scripts and cannot be given.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Variables { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Told about the run as it goes, on the thread that runs it, in order.</summary>
     public IProgress<EngineEvent>? Progress { get; init; }
 

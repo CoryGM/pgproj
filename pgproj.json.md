@@ -180,6 +180,12 @@ only when the publish has changes; otherwise it is left out, with the files it i
 markers in a file, and a tenant's variable (`:'tenant_id'`) in these scripts are errors when the project is loaded or built; a tenant's own scripts are
 `tenants.predeploy` and `tenants.postdeploy`.
 
+#### Variables
+
+A script can name a value with psql's syntax, `:'name'` or `:"name"`, instead of writing it: a password, or a value that differs between environments.
+`publish --execute` takes it from the environment variable `PGPROJ_VAR_<name>`; a printed or written script keeps it as written. See
+[Variables in the deploy scripts](docs/notes/variables.md).
+
 ### `excludeGrants` / `excludeRoleMemberships`
 
 These optional fields let a project opt out of modeling grants and/or role memberships entirely — for example,
