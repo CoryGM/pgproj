@@ -114,6 +114,26 @@ public sealed class DeployScriptsTests
         Assert.IsEmpty(syntax, string.Join(" | ", syntax.Select(static problem => problem.Message)));
     }
 
+    /// <summary>G-335 (the user's decisions of 2026-11-09): build reports a deploy script's transaction control, the project's and a tenant's, at its line.</summary>
+    [TestMethod]
+    public void BuildReportsTransactionControlInTheProjectsAndATenantsScripts()
+    {
+        using var directory = new TempDirectory();
+        var project = directory.Project(post: "ALTER ROLE app PASSWORD :'app_password';\nCOMMIT;\nBEGIN;\n") with { Tenants = directory.Tenants(pre: "SELECT 1;\nVACUUM :\"tenant_schema\".orders;\n") };
+
+        var problems = DeployScripts.Check(project, new PgQueryParser()).ToArray();
+
+        var commit = problems.Single(static problem => problem.Message.StartsWith("COMMIT (or END)", StringComparison.Ordinal));
+        Assert.AreEqual(SemanticDiagnosticSeverity.Error, commit.Severity);
+        Assert.AreEqual(2, commit.Location.Line, "after a variable's stand-in, the line is the file's");
+        StringAssert.EndsWith(commit.Location.FilePath!, "project-post.sql");
+        Assert.AreEqual(SemanticDiagnosticSeverity.Warning, problems.Single(static problem => problem.Message.StartsWith("BEGIN", StringComparison.Ordinal)).Severity);
+        var vacuum = problems.Single(static problem => problem.Message.StartsWith("VACUUM", StringComparison.Ordinal));
+        Assert.AreEqual(SemanticDiagnosticSeverity.Error, vacuum.Severity);
+        StringAssert.EndsWith(vacuum.Location.FilePath!, "tenant-pre.sql");
+        Assert.HasCount(3, problems, string.Join(" | ", problems.Select(static problem => problem.Message)));
+    }
+
     [TestMethod]
     public void ASyntaxErrorBesideAVariableIsReportedAtTheAuthorsPosition()
     {

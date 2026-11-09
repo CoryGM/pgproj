@@ -537,7 +537,9 @@ that must follow a shared change should run on every publish and do nothing when
 
 - a marker a script does not take: an unknown value, a tenant marker in the project's own script, or `when=changed` in a tenant's;
 - two markers in one file;
-- `tenant_schema` or `tenant_id` in the project's own scripts, which run once and have no tenant.
+- `tenant_schema` or `tenant_id` in the project's own scripts, which run once and have no tenant;
+- a statement that ends the tenant's transaction (`COMMIT`, `ROLLBACK`, ...) or that PostgreSQL refuses inside one (`VACUUM`, ...), and, as a warning,
+  a `BEGIN` ([`pgproj.json.md`](../../pgproj.json.md#transactions)).
 
 Any other variable, in a tenant's scripts or the project's, is one `publish --execute` takes from the environment (`PGPROJ_VAR_<name>`): see
 [Variables in the deploy scripts](variables.md).

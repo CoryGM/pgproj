@@ -258,8 +258,10 @@ and an object in the way of a change (a view on a column whose type changes, say
 - **A printed or written script carries its transaction:** it starts with `BEGIN;` and ends with `COMMIT;` (a `SET lock_timeout` from `--lock-timeout`
   comes before the `BEGIN`), so `psql -f deploy.sql` applies all of it or, when a statement fails, none of it, as `--execute` does. Do not add psql's
   `--single-transaction`. The `--concurrently` statements come after the `COMMIT`, and a project with tenants has a transaction per part: for those,
-  `publish` warns and advises `psql -v ON_ERROR_STOP=1 -f deploy.sql`, so psql stops at the first error. A pre- or post-deploy script must not end
-  the transaction itself (`COMMIT`, `ROLLBACK`).
+  `publish` warns and advises `psql -v ON_ERROR_STOP=1 -f deploy.sql`, so psql stops at the first error.
+- **A pre- or post-deploy script runs inside that transaction,** so `build` reports, at its line, a statement that would break it: one that ends the
+  transaction (`COMMIT`, `END`, `ROLLBACK`, `ABORT`, `PREPARE TRANSACTION`) and one PostgreSQL refuses inside a transaction (`VACUUM`,
+  `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, `ALTER SYSTEM`, ...) are errors, which stop `publish`; a `BEGIN` is a warning. A savepoint is fine.
 - **The deploy scripts can name a value instead of writing it:** `:'name'` or `:"name"`, psql's syntax, for a password or a value per environment.
   `--execute` takes it from the environment variable `PGPROJ_VAR_<name>`, only in what it runs, and refuses to run when one is not set; the value is
   never printed and is masked in an error. A printed or written script keeps the variables, and `publish` names them: run it with

@@ -4,7 +4,7 @@ using PgProj.Semantics;
 
 namespace PgProj.Engine;
 
-/// <summary>What <c>build</c> checks in the pre- and post-deployment scripts (G-124, G-290e): their syntax, and their use of the tenant variables.</summary>
+/// <summary>What <c>build</c> checks in the pre- and post-deployment scripts (G-124, G-290e, G-336, G-335): their syntax, their variables, and their transaction control.</summary>
 internal static class DeployScriptCheck
 {
     // The diagnostics say where they come from, and always have: this class was DeployScripts in the CLI.
@@ -44,6 +44,11 @@ internal static class DeployScriptCheck
             if (ProjectVariables(file) is { } problem)
             {
                 yield return problem;
+            }
+
+            foreach (var statement in TransactionControl(file, file.Text))
+            {
+                yield return statement;
             }
         }
 
@@ -85,5 +90,23 @@ internal static class DeployScriptCheck
         {
             yield return new SemanticDiagnostic(SemanticDiagnosticSeverity.Error, diagnostic.Message, SemanticLocation.FromSql(file.FilePath, diagnostic), diagnostic.Source);
         }
+
+        foreach (var statement in TransactionControl(file, substituted))
+        {
+            yield return statement;
+        }
     }
+
+    /// <summary>
+    /// A script file's statements that do not belong in the transaction pgproj publishes in (G-335): one that ends it or that PostgreSQL refuses in a
+    /// transaction block is an error, a <c>BEGIN</c> a warning, each at its statement. <paramref name="text"/> is the file's text as checked: the
+    /// environment's variables (G-336) are replaced by same-length stand-ins here, so the positions are the file's.
+    /// </summary>
+    public static IEnumerable<SemanticDiagnostic> TransactionControl(ScriptSourceFile file, string text)
+        => PgQueryParser.FindTransactionControl(ScriptVariables.StandIn(text))
+            .Select(diagnostic => new SemanticDiagnostic(
+                diagnostic.Severity == SqlDiagnosticSeverity.Error ? SemanticDiagnosticSeverity.Error : SemanticDiagnosticSeverity.Warning,
+                diagnostic.Message,
+                SemanticLocation.FromSql(file.FilePath, diagnostic),
+                diagnostic.Source));
 }

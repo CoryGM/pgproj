@@ -147,6 +147,17 @@ PostgreSQL's documentation lists the codes.
 Each problem starts with where it is, `file:line:column-endLine:endColumn`, so an editor or terminal can jump to it. `[Error]` stops `diff` and `publish`;
 `[Warning]` does not.
 
+### ... in a deploy script ends the transaction pgproj publishes in
+
+```text
+pre.sql:2:1-2:7: [Error] COMMIT (or END) in a deploy script ends the transaction pgproj publishes in, so what comes after it would run outside the transaction and stay applied when a later statement fails; remove it (pgproj commits at the end): COMMIT
+```
+
+The pre- and post-deploy scripts run inside `publish`'s transaction. Remove the `COMMIT` or `ROLLBACK`: pgproj commits once everything has run, and
+rolls back if anything fails. The same error for `VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, and the like (`cannot run inside a transaction
+block`) means PostgreSQL would refuse the statement inside a transaction: run it separately, outside pgproj. A `BEGIN` is only a warning, and a savepoint
+is fine ([`pgproj.json.md`](../pgproj.json.md#transactions)).
+
 ### ... is not modeled; the statement is ignored
 
 ```text

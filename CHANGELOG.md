@@ -24,6 +24,10 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   printed or written script keeps the variables, and `publish` names them, so it runs with `psql -v name=value -f`. `build` checks the scripts without
   the values. `pgproj about` lists the variables set, never their values. Before, a variable in the project's own scripts was an error, and a tenant's
   scripts could use only `tenant_schema` and `tenant_id` ([Variables in the deploy scripts](docs/notes/variables.md)).
+- **`build` reports transaction control in the deploy scripts:** a `COMMIT`, `ROLLBACK`, or other statement that ends the transaction, and a statement
+  PostgreSQL refuses inside one (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, ...), are errors at their line, so `publish` does not run;
+  a `BEGIN` is a warning. Before, a `COMMIT` in a pre-deploy script committed what ran before it, and `publish --execute` then failed with
+  `Transaction is already completed`, leaving that part applied.
 
 ### Library
 
