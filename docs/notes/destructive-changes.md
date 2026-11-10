@@ -1,5 +1,9 @@
 # Destructive changes
 
+**No warranty.** pgproj changes database schemas, and a publish can drop objects and the data in them. It is provided "as is", without warranty of
+any kind, and its authors accept no liability for any loss, including lost data ([Apache License 2.0](../../LICENSE), sections 7 and 8). Review a script
+with `--dry-run` before you run it, try changes on a copy first, and keep backups.
+
 `publish --execute` refuses to run a script that can discard data or access unless `--allow-destructive` is also given. It lists each affected operation with the reason, and runs nothing. These are the changes it counts:
 
 - a dropped table;
