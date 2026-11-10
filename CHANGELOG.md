@@ -51,6 +51,10 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   project's rules may give an object is now allowed and not required (a rule is not retroactive, so an older object without it is not changed either), and
   `publish` writes the rules before the objects they cover, so an object created in the same publish gets what they give
   ([Default privileges](docs/notes/default-privileges.md)).
+- **A default-privileges rule on types or functions without `IN SCHEMA` converges:** PostgreSQL then stores the kind's whole default list, `PUBLIC`'s
+  built-in `USAGE` on types or `EXECUTE` on functions included, and pgproj read that entry as a rule the project did not state, so `diff` reported it after
+  every publish and `publish` planned `ALTER DEFAULT PRIVILEGES REVOKE ALL PRIVILEGES ON TYPES FROM PUBLIC`, a destructive change. It is now PostgreSQL's
+  default and is not compared, and `init` no longer writes it ([Default privileges](docs/notes/default-privileges.md)).
 
 ### Library
 

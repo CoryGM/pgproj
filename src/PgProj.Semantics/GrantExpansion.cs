@@ -29,7 +29,15 @@ public readonly record struct GrantAtom(string Target, string Grantee, string Pr
         || (Grantee == "public"
             && Privilege == "USAGE"
             && !WithGrantOption
-            && Target == "schema:public");
+            && Target == "schema:public")
+        // PUBLIC's USAGE in a rule on types and its EXECUTE in one on functions, with no IN SCHEMA, are what PostgreSQL gives every new type and routine
+        // anyway: a stated one asks for nothing, and the live read leaves the entry out of the list PostgreSQL stores (G-340). In one schema it is a rule.
+        || (Grantee == "public"
+            && !WithGrantOption
+            && ((Privilege == "USAGE" && IsGlobalDefault(Target, "default types")) || (Privilege == "EXECUTE" && IsGlobalDefault(Target, "default functions"))));
+
+    private static bool IsGlobalDefault(string target, string kind)
+        => target == kind || target.StartsWith(kind + " for role:", StringComparison.Ordinal);
 
     /// <summary>Membership of one role in another. It is only ever added: removing it is a destructive change that is not made.</summary>
     public bool IsRoleMembership => Target.StartsWith("role:", StringComparison.Ordinal);

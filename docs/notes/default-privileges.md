@@ -11,6 +11,13 @@ A rule without `IN SCHEMA` applies in every schema, and one with it adds to that
 `SEQUENCES` sequences; `FUNCTIONS` functions, procedures, and aggregates; `TYPES` enum, composite, and range types and domains; `SCHEMAS` schemas. A rule
 belongs to the role that creates the objects: `FOR ROLE` names another, and without it the rule is the role that deploys.
 
+## PUBLIC's built-in privileges
+
+PostgreSQL gives `PUBLIC` `USAGE` on every new type and `EXECUTE` on every new function and procedure. Once a rule without `IN SCHEMA` exists on `TYPES`
+or `FUNCTIONS`, PostgreSQL stores the kind's whole list, and that entry for `PUBLIC` is in it. pgproj leaves it out when it reads the database, and a project
+that writes `ALTER DEFAULT PRIVILEGES GRANT USAGE ON TYPES TO PUBLIC` asks for nothing more than the default, so neither is a difference. A rule granting to
+`PUBLIC` in one schema, or on tables, sequences, or schemas, is a real rule and is compared.
+
 ## What a rule gives an object
 
 PostgreSQL applies a rule only when an object is created: it never changes an object that already exists, and an object created before the rule keeps the

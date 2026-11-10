@@ -391,6 +391,8 @@ public sealed partial class LiveDatabaseModelLoader
     /// Default privileges. Those of the role that is connected are reported as they are written (no <c>FOR ROLE</c>); those of any
     /// other role say <c>FOR ROLE</c>, which is how a project states them. The role's own entry in its list is left out, as for
     /// every other kind of privilege: it is implicit, and reporting it would have the project revoke the role's own defaults.
+    /// <c>PUBLIC</c>'s <c>USAGE</c> in a list with no <c>IN SCHEMA</c> on types, and its <c>EXECUTE</c> in one on functions, are left out too (G-340): PostgreSQL
+    /// stores the whole default list for the kind once such a rule exists, and those entries are its built-in defaults, not a rule the project states.
     /// </summary>
     private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadDefaultPrivilegesGrantsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
     {
@@ -414,6 +416,10 @@ public sealed partial class LiveDatabaseModelLoader
             cross join lateral pg_catalog.aclexplode(defacl.defaclacl) acl
             where defacl.defaclobjtype in ('r', 'S', 'f', 'T', 'n')
               and acl.grantee <> defacl.defaclrole
+              -- A rule with no IN SCHEMA on types or functions stores the kind's whole list, PUBLIC's built-in USAGE or EXECUTE included:
+              -- PostgreSQL's default, not a rule (G-340).
+              and not (acl.grantee = 0 and defacl.defaclnamespace = 0
+                       and ((defacl.defaclobjtype = 'T' and acl.privilege_type = 'USAGE') or (defacl.defaclobjtype = 'f' and acl.privilege_type = 'EXECUTE')))
               -- A default privilege with no IN SCHEMA (ns.nspname is null) applies database-wide, not to one
               -- schema, so schema-scoping never excludes it (G-85).
               and (@schemas is null or ns.nspname is null or ns.nspname = any(@schemas))

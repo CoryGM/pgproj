@@ -133,6 +133,7 @@ public sealed class DefaultPrivilegeEndToEndTests
             var rules = $"""
                 CREATE SCHEMA app;
                 ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO {role};
+                ALTER DEFAULT PRIVILEGES GRANT USAGE ON TYPES TO {role};
                 ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT USAGE ON TYPES TO {role};
                 ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT EXECUTE ON FUNCTIONS TO {role};
                 ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT USAGE ON SEQUENCES TO {role};
