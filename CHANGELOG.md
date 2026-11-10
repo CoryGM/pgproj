@@ -13,6 +13,10 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ### Commands
 
+- **A project of more than about a thousand files no longer crashes `diff` and `publish` on Linux:** after reading the project, the command ended
+  with a segmentation fault (exit code 139) and no message at its first connection to the database (seen with GitLab's schema, 2,753 files). The parser
+  took one of the process's 1,024 thread-local keys for each file and never gave it back, leaving none for the TLS library; it now parses on threads it
+  uses again. 0.2.1 has it too. Windows was not affected.
 - **The script `publish` prints or writes is atomic:** it starts with `BEGIN;` and ends with `COMMIT;`, so `psql -f deploy.sql` applies all of it or,
   when a statement fails, none of it, as `--execute` does. The warning that it was not wrapped in a transaction is gone, and so is the advice to use
   `psql --single-transaction`, which now only adds warnings. A `SET lock_timeout` comes before the `BEGIN`. With `--concurrently`, its statements come
