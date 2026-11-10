@@ -362,6 +362,7 @@ public sealed class DependencyAnalyzer
 
         AddTextSearchConfigurationDependencies(model, semanticNode, dependencyIds);
         AddExpressionSequenceDependencies(model, semanticNode, dependencyIds);
+        AddDefaultPrivilegeDependencies(model, semanticNode, dependencyIds);
 
         // A view, or a SQL-language routine body, that reads another view needs that view first; PostgreSQL resolves both at CREATE (G-90, G-91).
         var referencedViews = semanticNode switch
@@ -391,6 +392,41 @@ public sealed class DependencyAnalyzer
     /// the same publish came after the grant and was never granted anything. Other grants (on the schema itself, or default
     /// privileges, which apply to objects created later) name no existing object and get no edges.
     /// </summary>
+    /// <summary>The default-privilege rules of each model, by the kind of object they cover (G-339), read once per model.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DatabaseModel, ILookup<string, GrantDefinition>> DefaultPrivilegeRules = new();
+
+    /// <summary>
+    /// An object a default-privilege rule covers (<c>ALTER DEFAULT PRIVILEGES [IN SCHEMA s] GRANT ... ON TABLES|SEQUENCES|FUNCTIONS|TYPES</c>, global or in the
+    /// object's schema) is created after the rule (G-339, the user's decision of 2026-11-09), so it gets what the rule gives, as running the project's SQL on an
+    /// empty database would. A rule applies only to what is created after it.
+    /// </summary>
+    private static void AddDefaultPrivilegeDependencies(DatabaseModel model, ISemanticNode semanticNode, ISet<string> dependencyIds)
+    {
+        var kind = semanticNode switch
+        {
+            TableDefinition or ViewDefinition => "tables",
+            SequenceDefinition => "sequences",
+            FunctionDefinition or ProcedureDefinition or AggregateDefinition => "functions",
+            TypeDefinition type when !string.Equals(type.TypeKind, "extension", StringComparison.OrdinalIgnoreCase) => "types",
+            _ => null,
+        };
+        if (kind is null)
+        {
+            return;
+        }
+
+        var rules = DefaultPrivilegeRules.GetValue(model, static rulesModel => rulesModel.Grants.Values
+            .Where(static grant => grant.ObjectKey?.StartsWith("default ", StringComparison.Ordinal) == true)
+            .ToLookup(static grant => GrantExpansion.DefaultPrivilegeKind(grant.ObjectKey!), StringComparer.Ordinal));
+        foreach (var rule in rules[kind])
+        {
+            if (rule.SchemaName is null || string.Equals(rule.SchemaName, semanticNode.SchemaName, StringComparison.Ordinal))
+            {
+                dependencyIds.Add(rule.Key);
+            }
+        }
+    }
+
     private static void AddGrantedObjectDependencies(DatabaseModel model, GrantDefinition grant, ISet<string> dependencyIds)
     {
         AddGrantedObjectDependenciesCore(model, grant, dependencyIds);

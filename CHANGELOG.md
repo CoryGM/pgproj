@@ -46,6 +46,11 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   **If a database revoked `PUBLIC`'s `USAGE` on a type and the project does not say so, `diff` now reports it, and `publish` gives it back**: add the
   `REVOKE` to the project (`init` writes it), or set `excludeGrants`. `publish` warns before anything runs when it gives `PUBLIC` a privilege on
   something the database already has ([Privileges on types and domains](docs/notes/type-privileges.md)).
+- **An object created under default privileges converges:** PostgreSQL gives a new object what `ALTER DEFAULT PRIVILEGES` names, and pgproj used to
+  report that as a grant to revoke, so the publish after the one that created a table in a database with such a rule planned a `REVOKE`. What one of the
+  project's rules may give an object is now allowed and not required (a rule is not retroactive, so an older object without it is not changed either), and
+  `publish` writes the rules before the objects they cover, so an object created in the same publish gets what they give
+  ([Default privileges](docs/notes/default-privileges.md)).
 
 ### Library
 

@@ -92,6 +92,81 @@ public static class GrantExpansion
         return atoms;
     }
 
+    /// <summary>The kind of object a default-privilege rule's key names (<c>default tables in schema:s</c> is <c>tables</c>; G-339).</summary>
+    public static string DefaultPrivilegeKind(string objectKey)
+    {
+        ArgumentNullException.ThrowIfNull(objectKey);
+
+        var rest = objectKey.StartsWith("default ", StringComparison.Ordinal) ? objectKey["default ".Length..] : objectKey;
+        var inSchema = rest.IndexOf(" in schema:", StringComparison.Ordinal);
+        return inSchema < 0 ? rest : rest[..inSchema];
+    }
+
+    /// <summary>
+    /// What the default-privilege rules of <paramref name="project"/> may give an object (G-339, option (c), the user's decision of 2026-11-09): a privilege a rule
+    /// would give an object of its kind, globally or in the object's schema, is allowed and not required, since PostgreSQL applies a rule only to what is created
+    /// after it and pgproj cannot know which existing objects were. A rule of any <c>FOR ROLE</c> counts. <c>TABLES</c> covers tables and views (whose grants are
+    /// <c>table:</c>), <c>FUNCTIONS</c> functions and procedures, <c>TYPES</c> types and domains, <c>SCHEMAS</c> schemas.
+    /// </summary>
+    public static Func<GrantAtom, bool> DefaultPrivilegeTolerance(DatabaseModel project)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        var given = new HashSet<(string Kind, string? Schema, string Grantee, string Privilege, bool WithGrantOption)>();
+        foreach (var rule in project.Grants.Values.Where(static grant => grant.ObjectKey?.StartsWith("default ", StringComparison.Ordinal) == true && !string.IsNullOrWhiteSpace(grant.Grantee)))
+        {
+            var kind = DefaultPrivilegeKind(rule.ObjectKey!);
+            var fullSet = kind switch
+            {
+                "sequences" => SequencePrivileges,
+                "functions" => RoutinePrivileges,
+                "types" => TypePrivileges,
+                "schemas" => SchemaPrivileges,
+                _ => TablePrivileges,
+            };
+            var grantee = string.Equals(rule.Grantee, "public", StringComparison.OrdinalIgnoreCase) ? "public" : rule.Grantee!;
+            foreach (var privilege in PrivilegesFor(rule.Privileges, fullSet))
+            {
+                given.Add((kind, rule.SchemaName, grantee, privilege, rule.WithGrantOption));
+            }
+        }
+
+        if (given.Count == 0)
+        {
+            return static _ => false;
+        }
+
+        return atom =>
+        {
+            var separator = atom.Target.IndexOf(':', StringComparison.Ordinal);
+            if (separator < 0)
+            {
+                return false;
+            }
+
+            var kind = atom.Target[..separator] switch
+            {
+                "table" => "tables",
+                "sequence" => "sequences",
+                "function" or "procedure" => "functions",
+                "type" => "types",
+                "schema" => "schemas",
+                _ => null,
+            };
+            if (kind is null)
+            {
+                return false;
+            }
+
+            // A schema's own grant names the schema; any other object's target is "kind:schema.name".
+            var rest = atom.Target[(separator + 1)..];
+            var dot = rest.IndexOf('.', StringComparison.Ordinal);
+            var schema = kind == "schemas" ? null : dot < 0 ? null : rest[..dot];
+            return given.Contains((kind, null, atom.Grantee, atom.Privilege, atom.WithGrantOption))
+                || (schema is not null && given.Contains((kind, schema, atom.Grantee, atom.Privilege, atom.WithGrantOption)));
+        };
+    }
+
     private static IEnumerable<(string Target, IReadOnlyList<string> FullSet)> Targets(GrantDefinition grant, DatabaseModel model, string? connectedRole)
     {
         var objectKey = grant.ObjectKey!;

@@ -825,11 +825,14 @@ public sealed class DiffEngine
         var newAtoms = newGrants.Select(grant => (Grant: grant, Atoms: GrantExpansion.Expand(grant, newModel, connectedRole))).ToArray();
         var wanted = newAtoms.SelectMany(static item => item.Atoms).ToHashSet();
 
+        // What the project's default-privilege rules may give an object is allowed, not required (G-339, option (c)).
+        var tolerated = GrantExpansion.DefaultPrivilegeTolerance(newModel);
+
         var inEffect = new HashSet<GrantAtom>();
         foreach (var oldGrant in oldGrants)
         {
             var atoms = GrantExpansion.Expand(oldGrant, oldModel, connectedRole);
-            var isExtra = atoms.Any(atom => !atom.IsImplicit && !atom.IsRoleMembership && !wanted.Contains(atom));
+            var isExtra = atoms.Any(atom => !atom.IsImplicit && !atom.IsRoleMembership && !wanted.Contains(atom) && !tolerated(atom));
 
             if (isExtra)
             {
