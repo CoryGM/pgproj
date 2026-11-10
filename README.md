@@ -19,6 +19,10 @@ It works with PostgreSQL 14, 15, 16, 17, and 18, runs on Windows, Linux, and mac
 your own tools. Choosing between pgproj, EF Core migrations, Flyway, Atlas, or pgCodeKeeper? [Why pgproj?](docs/why-pgproj.md) compares them and
 says which fits which situation.
 
+**No warranty.** pgproj changes database schemas, and a publish can drop objects and the data in them. It is provided "as is", without warranty of
+any kind, and its authors accept no liability for any loss, including lost data ([Apache License 2.0](LICENSE), sections 7 and 8). Review a script
+with `--dry-run` before you run it, try changes on a copy first, and keep backups.
+
 ## Contents
 
 - [Installing](#installing)

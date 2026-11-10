@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+### Documentation
+
+- **The README and the destructive-changes note say plainly that pgproj comes with no warranty:** a publish can drop objects and their data,
+  pgproj is provided "as is" under the Apache License 2.0 (sections 7 and 8), and they advise a `--dry-run` first, a copy to try changes on, and backups.
+
 ## [0.3.0] - 2026-11-10
 
 ### Installing
