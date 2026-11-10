@@ -68,7 +68,7 @@ internal static class GrantPrivilegeSets
             return FunctionPrivileges;
         }
 
-        return StartsWithAny(objectKey, "default types") ? TypePrivileges : null;
+        return StartsWithAny(objectKey, "type:", "default types") ? TypePrivileges : null;
     }
 
     private static bool StartsWithAny(string objectKey, params string[] prefixes)

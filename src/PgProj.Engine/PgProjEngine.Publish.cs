@@ -225,6 +225,13 @@ public sealed partial class PgProjEngine
             Warn(warnings, progress, new PublishNotice(PublishNoticeKind.LockRewrite, LockWarnings.Describe(lockWarnings), PublishItems.LockRewrites(lockWarnings)));
         }
 
+        // A privilege given to PUBLIC on something that exists, which --allow-destructive does not cover (G-337).
+        var publicGrants = commentsOnly ? [] : PublicGrants.Find(unit.Transactional, liveModel);
+        if (publicGrants.Count > 0)
+        {
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.PublicGrant, PublicGrants.Describe(publicGrants), [.. publicGrants.Select(static statement => new PublishItem(PublishNoticeKind.PublicGrant, statement, PgProj.Diff.ChangeNodeKind.Grant))]));
+        }
+
         // A drop, rename, or retype of something a PL/pgSQL body names: PostgreSQL will not stop it and the routine fails when it runs (G-303b).
         var bodyNotes = commentsOnly ? [] : PlpgsqlBodyNotes.Find(changeSet, model);
         if (bodyNotes.Count > 0)

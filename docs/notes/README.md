@@ -50,6 +50,7 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Roles](roles.md) — reported, not modeled; the check before `publish --execute`
 - [Tablespaces](tablespaces.md) — the `TABLESPACE` clause, and the check before `publish --execute`
 - [Owners](owners.md) — `OWNER TO`, and why an owner the project does not state is not compared
+- [Privileges on types and domains](type-privileges.md) — `GRANT USAGE ON TYPE`, and `REVOKE ... FROM PUBLIC` for PostgreSQL's default
 
 ## Tables, columns, and types
 

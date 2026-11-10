@@ -20,6 +20,12 @@ public readonly record struct GrantAtom(string Target, string Grantee, string Pr
             && Privilege == "EXECUTE"
             && !WithGrantOption
             && (Target.StartsWith("function:", StringComparison.Ordinal) || Target.StartsWith("procedure:", StringComparison.Ordinal)))
+        // USAGE for PUBLIC on a type or domain is PostgreSQL's default too (G-337), but one a project can take away: whether a type has it is decided by a
+        // GrantDefinition.RevokesDefault definition, compared by its key, not by atoms.
+        || (Grantee == "public"
+            && Privilege == "USAGE"
+            && !WithGrantOption
+            && Target.StartsWith("type:", StringComparison.Ordinal))
         || (Grantee == "public"
             && Privilege == "USAGE"
             && !WithGrantOption
@@ -66,7 +72,8 @@ public static class GrantExpansion
         ArgumentNullException.ThrowIfNull(grant);
         ArgumentNullException.ThrowIfNull(model);
 
-        if (string.IsNullOrWhiteSpace(grant.Grantee) || string.IsNullOrWhiteSpace(grant.ObjectKey))
+        // A revoked default (G-337) gives nothing: it is compared by its key.
+        if (string.IsNullOrWhiteSpace(grant.Grantee) || string.IsNullOrWhiteSpace(grant.ObjectKey) || grant.RevokesDefault)
         {
             return [];
         }
@@ -156,6 +163,11 @@ public static class GrantExpansion
         else if (objectKey.StartsWith("procedure:", StringComparison.OrdinalIgnoreCase) && grant.ObjectName is { } procedureName)
         {
             yield return (ObjectTarget("procedure", grant.SchemaName, procedureName), RoutinePrivileges);
+        }
+        else if (objectKey.StartsWith("type:", StringComparison.OrdinalIgnoreCase) && grant.ObjectName is { } typeName)
+        {
+            // A type or a domain (G-337).
+            yield return (ObjectTarget("type", grant.SchemaName, typeName), TypePrivileges);
         }
     }
 

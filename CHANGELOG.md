@@ -38,6 +38,14 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   PostgreSQL refuses inside one (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, ...), are errors at their line, so `publish` does not run;
   a `BEGIN` is a warning. Before, a `COMMIT` in a pre-deploy script committed what ran before it, and `publish --execute` then failed with
   `Transaction is already completed`, leaving that part applied.
+- **Privileges on types and domains are modeled:** `GRANT USAGE ON TYPE` or `ON DOMAIN` (enum, composite, and range types, and domains) is deployed,
+  read back from the database, compared by `diff`, and written by `init` in the type's file, where before it was a warning and ignored. PostgreSQL gives
+  `USAGE` on every new type to `PUBLIC`; a project takes that away with `REVOKE USAGE ON TYPE ... FROM PUBLIC` (the form `pg_dump` writes), the one
+  `REVOKE` pgproj reads, and a type without it is compared as having the default. Taking it away from a type that exists needs `--allow-destructive`. A
+  type `publish` drops and creates, or rebuilds under its columns, now gets its privileges back; before, it came back with the default, silently.
+  **If a database revoked `PUBLIC`'s `USAGE` on a type and the project does not say so, `diff` now reports it, and `publish` gives it back**: add the
+  `REVOKE` to the project (`init` writes it), or set `excludeGrants`. `publish` warns before anything runs when it gives `PUBLIC` a privilege on
+  something the database already has ([Privileges on types and domains](docs/notes/type-privileges.md)).
 
 ### Library
 
@@ -45,6 +53,7 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   that runs it in a transaction of its own. `PublishNoticeKind.NotTransactional` is now raised only for a `--concurrently` script or one with tenants.
 - **`PublishRequest.Variables`** gives the deploy scripts' variables their values for `PublishMode.Execute`, and **`PublishNoticeKind.Variables`** is the
   warning of a plan whose kept script uses variables, and the refusal of a run that lacks one.
+- **`PublishNoticeKind.PublicGrant`** is the warning that the script gives `PUBLIC` a privilege on an object the database already has.
 
 ## [0.2.1] - 2026-10-23
 

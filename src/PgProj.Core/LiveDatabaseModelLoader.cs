@@ -166,7 +166,7 @@ public sealed partial class LiveDatabaseModelLoader
                 var plural = kind["all ".Length..^" in schema".Length];
                 privileges.Add(new UnmodeledPrivilege(plural.TrimEnd('s'), grant.SchemaName, null, grant.Statement));
             }
-            else if (kind is "table" or "sequence" or "function" or "procedure" && target.StartsWith(grant.SchemaName + ".", StringComparison.Ordinal))
+            else if (kind is "table" or "sequence" or "function" or "procedure" or "type" && target.StartsWith(grant.SchemaName + ".", StringComparison.Ordinal))
             {
                 var name = target[(grant.SchemaName.Length + 1)..];
                 var arguments = name.IndexOf('(', StringComparison.Ordinal);

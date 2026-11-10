@@ -120,7 +120,7 @@ public static class DefaultSchema
         };
 
         /// <summary>The grant object kinds whose targets live in a schema; a schema itself, a database, a role, and so on do not.</summary>
-        private static readonly HashSet<string> SchemaScopedGrantKinds = new(StringComparer.OrdinalIgnoreCase) { "table", "sequence", "function", "procedure", "routine" };
+        private static readonly HashSet<string> SchemaScopedGrantKinds = new(StringComparer.OrdinalIgnoreCase) { "table", "sequence", "function", "procedure", "routine", "type", "domain" };
 
         /// <summary>A named object's grant target takes the default; a schema-level target (the schema itself, or <c>ALL ... IN SCHEMA</c>) and a role do not.</summary>
         private Func<GrantTarget, GrantTarget> ApplyTarget(GrantNode grant)

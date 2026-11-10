@@ -437,6 +437,7 @@ enum PgProj.Engine.PublishNoticeKind
   TenantsNotRead
   ServerNotice
   Variables
+  PublicGrant
 sealed class PgProj.Engine.PublishPart
   Boolean HasStatements
   PgProj.Diff.ChangeSet Changes

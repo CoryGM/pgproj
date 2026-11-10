@@ -21,6 +21,12 @@ internal static class GrantSqlBuilder
 
     private static string Build(GrantDefinition grant, bool isGrant)
     {
+        // A revoked default (G-337) is deployed as its REVOKE, and undone by giving PUBLIC the privilege back.
+        if (grant.RevokesDefault)
+        {
+            isGrant = !isGrant;
+        }
+
         var verb = isGrant ? "GRANT" : "REVOKE";
         if (string.IsNullOrWhiteSpace(grant.Grantee) || string.IsNullOrWhiteSpace(grant.ObjectKey))
         {
@@ -66,7 +72,8 @@ internal static class GrantSqlBuilder
             return $"ALTER DEFAULT PRIVILEGES{roleClause}{schemaClause} {verb} {privileges} ON {objectKind.ToUpperInvariant()} {direction} {grantee}{grantOption};";
         }
 
-        foreach (var kind in new[] { "table", "sequence", "function", "procedure" })
+        // A domain too: ON TYPE names one, and it is the form pg_dump writes (G-337).
+        foreach (var kind in new[] { "table", "sequence", "function", "procedure", "type" })
         {
             if (objectKey.StartsWith(kind + ":", StringComparison.OrdinalIgnoreCase))
             {

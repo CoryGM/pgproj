@@ -258,6 +258,8 @@ internal static class SearchPathQualifier
                 "function" => _functionSchemas,
                 "procedure" => _procedureSchemas,
                 "routine" => Merge(_functionSchemas, _procedureSchemas),
+                // A domain is a type: GRANT ... ON TYPE names one too (G-337).
+                "type" or "domain" => _typeSchemas,
                 _ => null,
             };
 

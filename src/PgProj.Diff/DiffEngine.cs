@@ -806,6 +806,9 @@ public sealed class DiffEngine
     {
         var oldGrants = OrderedGrants(oldModel);
         var newGrants = OrderedGrants(newModel);
+        DiffRevokedDefaults(newModel, oldGrants, newGrants, added, removed);
+        oldGrants = oldGrants.Where(static grant => !grant.RevokesDefault).ToArray();
+        newGrants = newGrants.Where(static grant => !grant.RevokesDefault).ToArray();
 
         foreach (var oldGrant in oldGrants)
         {
@@ -856,6 +859,37 @@ public sealed class DiffEngine
                 NodeKind = ChangeRecord.MapKind(newGrant),
                 Node = newGrant,
             });
+        }
+    }
+
+    /// <summary>
+    /// <c>REVOKE ... FROM PUBLIC</c> on a type or domain (G-337, <see cref="GrantDefinition.RevokesDefault"/>), compared by its key: one only the project has is
+    /// added (the default is taken away), and one only the database has is removed (<c>PUBLIC</c> is given its <c>USAGE</c> back), unless the project drops the
+    /// type, which takes its privileges with it.
+    /// </summary>
+    private static void DiffRevokedDefaults(
+        DatabaseModel newModel,
+        IReadOnlyList<GrantDefinition> oldGrants,
+        IReadOnlyList<GrantDefinition> newGrants,
+        ICollection<AddedChange> added,
+        ICollection<RemovedChange> removed)
+    {
+        var oldKeys = oldGrants.Where(static grant => grant.RevokesDefault).Select(static grant => grant.Key).ToHashSet(StringComparer.Ordinal);
+        var newKeys = newGrants.Where(static grant => grant.RevokesDefault).Select(static grant => grant.Key).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var oldGrant in oldGrants.Where(grant => grant.RevokesDefault && !newKeys.Contains(grant.Key)))
+        {
+            if (oldGrant.ObjectName is { } typeName && !newModel.Types.ContainsKey(DatabaseModel.CreateKey(oldGrant.SchemaName, typeName)))
+            {
+                continue;
+            }
+
+            removed.Add(new RemovedChange { NodeId = oldGrant.Key, NodeKind = ChangeRecord.MapKind(oldGrant), Node = oldGrant });
+        }
+
+        foreach (var newGrant in newGrants.Where(grant => grant.RevokesDefault && !oldKeys.Contains(grant.Key)))
+        {
+            added.Add(new AddedChange { NodeId = newGrant.Key, NodeKind = ChangeRecord.MapKind(newGrant), Node = newGrant });
         }
     }
 

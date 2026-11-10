@@ -35,6 +35,12 @@ public sealed record class CreateOperation : SqlOperation
     /// </summary>
     public bool OnlyParent { get; init; }
 
+    /// <summary>
+    /// True for a grant (or a revoked default, G-337) issued again on an object that was dropped and created above (<c>InsertRegrants</c>, G-116): it puts back
+    /// what the object had, so it takes nothing away.
+    /// </summary>
+    public bool IsRestored { get; init; }
+
     public override string GenerateSql()
         => Node switch
         {

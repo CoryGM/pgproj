@@ -171,7 +171,7 @@ public sealed class ObjectGrantDeclarationTests
 
     [TestMethod]
     [DataRow("GRANT CONNECT ON DATABASE d TO r;", "DATABASE")]
-    [DataRow("GRANT USAGE ON TYPE public.ty TO r;", "TYPE")]
+    [DataRow("GRANT CREATE ON TABLESPACE ts TO r;", "TABLESPACE")]
     [DataRow("GRANT USAGE ON LANGUAGE plpgsql TO r;", "LANGUAGE")]
     [DataRow("GRANT USAGE ON FOREIGN DATA WRAPPER w TO r;", "FDW")]
     public void GrantOnAnUnmodeledKindIsReported(string sql, string kind)

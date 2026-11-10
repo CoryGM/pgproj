@@ -440,6 +440,8 @@ public sealed partial class LiveDatabaseModelLoader
             builder.Append(type.Statement.Trim().TrimEnd(';')).AppendLine(";");
             pathByOwnerKey[OwnerKey("type", type.SchemaName, type.TypeName, string.Empty)] = relativePath;
             pathByOwnerKey[OwnerKey("domain", type.SchemaName, type.TypeName, string.Empty)] = relativePath;
+            // Its privileges are written beside it (G-337).
+            pathByObjectKey[$"type:{type.SchemaName}.{type.TypeName}()"] = relativePath;
             Record(type.SchemaName, string.Equals(type.TypeKind, "domain", StringComparison.OrdinalIgnoreCase) ? "Domain" : "Type", type.TypeName, relativePath);
             if (!string.IsNullOrEmpty(type.Comment))
             {

@@ -325,6 +325,17 @@ public sealed partial class PgProjEngine
                 {
                     Warn(warnings, progress, new PublishNotice(PublishNoticeKind.LockRewrite, $"In {PartName(unit)}: " + LockWarnings.Describe(lockWarnings), PublishItems.LockRewrites(lockWarnings, unit.Label), unit.Label));
                 }
+
+                // A privilege given to PUBLIC on something that exists (G-337).
+                var publicGrants = commentsOnly ? [] : PublicGrants.Find(unit.Transactional, unit.LiveModel);
+                if (publicGrants.Count > 0)
+                {
+                    Warn(warnings, progress, new PublishNotice(
+                        PublishNoticeKind.PublicGrant,
+                        $"In {PartName(unit)}: " + PublicGrants.Describe(publicGrants),
+                        [.. publicGrants.Select(statement => new PublishItem(PublishNoticeKind.PublicGrant, statement, PgProj.Diff.ChangeNodeKind.Grant, Part: unit.Label))],
+                        unit.Label));
+                }
             }
 
             if (commentsOnly)

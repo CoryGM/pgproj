@@ -35,7 +35,7 @@ Files go in Title Case folders under the output directory:
   statistics, and grants.
 - `Schema/<schema>/View/`, `Function/`, `Procedure/`, `Sequence/`, `Type/`, `Collation/`, `Aggregate/`, `Operator/`,
   `TextSearchDictionary/`, and `TextSearchConfiguration/` for the other kinds in a schema. A materialized view's indexes, and a view's
-  rules, are in the view's file.
+  rules, are in the view's file; a type's or domain's privileges in its own ([type privileges](notes/type-privileges.md)).
 - `Extension/`, `EventTrigger/`, `Cast/`, and `Publication/` at the top, for what belongs to no schema. An extension that requires others is
   written after them, in the file of the one that sorts last ([extensions](notes/extensions.md)).
 
@@ -271,6 +271,9 @@ and an object in the way of a change (a view on a column whose type changes, say
   [Schema-per-tenant databases](notes/tenants.md#deploying-publish)).
 - **A drop of something a PL/pgSQL body names is noted.** PostgreSQL records no dependency for such a body, so it does not stop a table, view, function, or qualified column that a
   routine's body uses from being dropped, renamed, or retyped, and the routine fails when it runs. `diff` and `publish` say which routine names what ([PL/pgSQL bodies](notes/plpgsql-bodies.md)).
+- **A privilege given to `PUBLIC` on something that exists is named.** Before anything runs, a warning lists each grant that gives `PUBLIC` (every role)
+  a privilege on an object the database already has: one the project adds, or a type's or domain's `USAGE` given back because the project does not revoke
+  it with `REVOKE USAGE ON TYPE ... FROM PUBLIC`. It takes nothing away, so `--allow-destructive` does not cover it ([type privileges](notes/type-privileges.md)).
 - **Schemas are never dropped.** A schema the project no longer uses is left in place (its objects are dropped as usual), and `diff` and
   `publish` warn and name it. Drop it yourself if you no longer want it (see [Schemas](notes/schemas.md)).
 

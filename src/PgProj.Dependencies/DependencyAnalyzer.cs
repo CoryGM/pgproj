@@ -479,6 +479,14 @@ public sealed class DependencyAnalyzer
                     dependencyIds.Add(procedure.Key);
                 }
             }
+            else if (objectKey.StartsWith("type:", StringComparison.OrdinalIgnoreCase))
+            {
+                // A type or a domain (G-337), and a revoked default on one: after it, and given again when it is dropped and created.
+                foreach (var type in model.Types.Values.Where(type => Named(type.SchemaName, type.Name)))
+                {
+                    dependencyIds.Add(type.Key);
+                }
+            }
         }
     }
 

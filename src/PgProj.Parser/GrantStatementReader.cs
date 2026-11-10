@@ -252,6 +252,12 @@ internal static class GrantStatementReader
             return ReadQualifiedName(typeName, "names") is { } parts ? new GrantTarget(parts.Schema, parts.Name) : null;
         }
 
+        // ON TYPE and ON DOMAIN name each object as a list of its name's parts (G-337).
+        if (element.TryGetProperty("List", out var nameList))
+        {
+            return ReadQualifiedName(nameList, "items") is { } parts ? new GrantTarget(parts.Schema, parts.Name) : null;
+        }
+
         if (element.TryGetProperty("ObjectWithArgs", out var routine))
         {
             if (ReadQualifiedName(routine, "objname") is not { } parts)

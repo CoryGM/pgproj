@@ -31,6 +31,11 @@ internal static class GrantDeclarations
 
         if (!node.IsGrant)
         {
+            if (DeclareRevokedDefaults(node, diagnostics, location) is { } revokedDefaults)
+            {
+                return revokedDefaults;
+            }
+
             diagnostics.Add(SemanticDiagnostics.Warning(
                 "REVOKE is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest.",
                 location,
@@ -61,7 +66,52 @@ internal static class GrantDeclarations
         };
     }
 
-    private static readonly string[] ObjectKinds = ["schema", "table", "sequence", "function", "procedure"];
+    private static readonly string[] ObjectKinds = ["schema", "table", "sequence", "function", "procedure", "type", "domain"];
+
+    /// <summary>The object kinds whose objects PostgreSQL gives <c>PUBLIC</c> a privilege by default that a project can revoke (G-337).</summary>
+    private static readonly string[] RevocableDefaultKinds = ["type", "domain"];
+
+    /// <summary>
+    /// <c>REVOKE USAGE|ALL ON TYPE|DOMAIN t FROM PUBLIC</c> (G-337, option (B), approved by the user on 2026-11-09), the form <c>pg_dump</c> writes for a type
+    /// without PostgreSQL's default: one <see cref="GrantDefinition.RevokesDefault"/> definition per type. Null for every other <c>REVOKE</c>, which stays a warning. A
+    /// grantee other than <c>PUBLIC</c> in the same statement is not read (a project states what it grants, and pgproj revokes the rest), and says so.
+    /// </summary>
+    private static List<GrantDefinition>? DeclareRevokedDefaults(GrantNode node, ICollection<SemanticDiagnostic> diagnostics, SemanticLocation? location)
+    {
+        var revokesTypeUsage = node.Form == GrantForm.Object
+            && RevocableDefaultKinds.Contains(node.ObjectKind)
+            && !node.WithGrantOption
+            && node.Privileges.All(static privilege => privilege.Columns.Count == 0
+                && privilege.Name is "USAGE" or "ALL" or AllPrivileges);
+        if (!revokesTypeUsage || !node.Grantees.Any(IsPublic))
+        {
+            return null;
+        }
+
+        var others = node.Grantees.Where(static grantee => !IsPublic(grantee)).Distinct(StringComparer.Ordinal).ToArray();
+        if (others.Length > 0)
+        {
+            diagnostics.Add(SemanticDiagnostics.Warning(
+                $"REVOKE ... FROM {string.Join(", ", others)} is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest. Only REVOKE ... FROM PUBLIC is read on a type or domain.",
+                location,
+                nameof(DeclarationPass)));
+        }
+
+        return node.Targets
+            .Select(target => CreateDefinition(
+                target.SchemaName,
+                $"type:{DatabaseModel.CreateKey(target.SchemaName, target.Name)}",
+                target.Name,
+                "PUBLIC",
+                [AllPrivileges],
+                columns: [],
+                withGrantOption: false,
+                forRole: null,
+                revokesDefault: true))
+            .ToList();
+    }
+
+    private static bool IsPublic(string grantee) => string.Equals(grantee, "PUBLIC", StringComparison.OrdinalIgnoreCase);
     private static readonly string[] AllInSchemaKinds = ["table", "sequence", "function"];
     private static readonly string[] DefaultPrivilegeKinds = ["table", "sequence", "function", "type", "schema"];
 
@@ -97,6 +147,12 @@ internal static class GrantDeclarations
                 case "sequence":
                     objectName = target.Name;
                     objectKey = $"{node.ObjectKind}:{DatabaseModel.CreateKey(schemaName, target.Name)}";
+                    break;
+                case "type":
+                case "domain":
+                    // A domain is a type: ON TYPE names one too, and both are one grant (G-337).
+                    objectName = target.Name;
+                    objectKey = $"type:{DatabaseModel.CreateKey(schemaName, target.Name)}";
                     break;
                 default:
                     // function or procedure
@@ -209,7 +265,8 @@ internal static class GrantDeclarations
         IReadOnlyList<string> privileges,
         IReadOnlyList<string> columns,
         bool withGrantOption,
-        string? forRole)
+        string? forRole,
+        bool revokesDefault = false)
     {
         // The full set of privileges for the object is ALL PRIVILEGES however it is written (G-61). A column list has its own
         // full set, which is not compared here: a column grant keeps the privileges as written.
@@ -240,6 +297,11 @@ internal static class GrantDeclarations
             keyParts.Add($"for_role={forRole}");
         }
 
+        if (revokesDefault)
+        {
+            keyParts.Add("revokes_default");
+        }
+
         return new GrantDefinition(
             DatabaseModel.CreateKey(schemaName, $"{name}:{string.Join(":", keyParts)}"),
             name,
@@ -260,6 +322,7 @@ internal static class GrantDeclarations
             Columns = columns,
             WithGrantOption = withGrantOption,
             ForRole = forRole,
+            RevokesDefault = revokesDefault,
         };
     }
 

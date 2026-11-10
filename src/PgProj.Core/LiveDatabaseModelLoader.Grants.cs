@@ -21,6 +21,7 @@ public sealed partial class LiveDatabaseModelLoader
         grants.AddRange(await ReadObjectGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadColumnGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadDefaultPrivilegesGrantsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadTypeGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadRoleMembershipsAsync(connection, cancellationToken));
         return grants;
     }
@@ -240,6 +241,87 @@ public sealed partial class LiveDatabaseModelLoader
                     $"{keyKind}:{schemaName}.{entry.Name}({entry.Arguments})",
                     grantee,
                     $"GRANT {NormalizePrivilegeArray(remaining, fullSet)} ON {target} TO {RenderGrantee(grantee)}{grantOption}"));
+            }
+        }
+
+        return grants;
+    }
+
+    /// <summary>
+    /// Privileges on enum, composite, and range types and on domains (G-337), read as a project states them. A type whose list is null has PostgreSQL's default
+    /// (the owner and <c>PUBLIC</c> have <c>USAGE</c>) and is not reported. Once a grant or revoke has written the list out, each role but the owner is reported with
+    /// a <c>GRANT</c>, and a list without <c>PUBLIC</c> as <c>REVOKE USAGE ... FROM PUBLIC</c>, the one revoke pgproj reads (option (B)). An array type has no
+    /// privileges of its own (PostgreSQL refuses a grant on one), a table's row type is the table's, and a multirange type is made with its range type: none is read.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadTypeGrantsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
+    {
+        const string typeGrantSql =
+            """
+            select ns.nspname as schema_name,
+                   typ.typname as type_name,
+                   typ.typtype = 'd' as is_domain,
+                   case when acl.grantee = 0 then 'PUBLIC' else pg_catalog.pg_get_userbyid(acl.grantee) end as grantee,
+                   acl.is_grantable
+            from pg_catalog.pg_type typ
+            inner join pg_catalog.pg_namespace ns on ns.oid = typ.typnamespace
+            cross join lateral pg_catalog.aclexplode(typ.typacl) acl
+            where typ.typacl is not null
+              and acl.privilege_type = 'USAGE'
+              and acl.grantee <> typ.typowner
+              and (typ.typtype in ('e', 'r', 'd')
+                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c')))
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas))
+            union all
+            -- A list that has been written out but names no one but the owner: PUBLIC's default was revoked, and nothing else was granted.
+            select ns.nspname, typ.typname, typ.typtype = 'd', null, false
+            from pg_catalog.pg_type typ
+            inner join pg_catalog.pg_namespace ns on ns.oid = typ.typnamespace
+            where typ.typacl is not null
+              and not exists (select 1 from pg_catalog.aclexplode(typ.typacl) acl where acl.grantee <> typ.typowner and acl.privilege_type = 'USAGE')
+              and (typ.typtype in ('e', 'r', 'd')
+                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c')))
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas));
+            """;
+
+        var granteesByType = new SortedDictionary<(string SchemaName, string TypeName), (bool IsDomain, List<(string Grantee, bool GrantOption)> Grantees)>();
+        await using (var command = CreateCommand(typeGrantSql, connection, scopeSchemas))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var key = (reader.GetString(0), reader.GetString(1));
+                if (!granteesByType.TryGetValue(key, out var entry))
+                {
+                    entry = (reader.GetBoolean(2), []);
+                    granteesByType[key] = entry;
+                }
+
+                if (!reader.IsDBNull(3))
+                {
+                    entry.Grantees.Add((reader.GetString(3), reader.GetBoolean(4)));
+                }
+            }
+        }
+
+        var grants = new List<LiveGrantSnapshot>();
+        foreach (var ((schemaName, typeName), (isDomain, grantees)) in granteesByType)
+        {
+            var objectKey = $"type:{schemaName}.{typeName}()";
+            var target = $"{(isDomain ? "DOMAIN" : "TYPE")} {RenderIdentifier(schemaName)}.{RenderIdentifier(typeName)}";
+            if (!grantees.Any(static grantee => grantee.Grantee == "PUBLIC"))
+            {
+                grants.Add(new LiveGrantSnapshot(schemaName, objectKey, "PUBLIC", $"REVOKE USAGE ON {target} FROM PUBLIC"));
+            }
+
+            foreach (var (grantee, grantOption) in grantees.Where(static grantee => grantee.Grantee != "PUBLIC").OrderBy(static grantee => grantee.Grantee, StringComparer.Ordinal))
+            {
+                grants.Add(new LiveGrantSnapshot(schemaName, objectKey, grantee, $"GRANT USAGE ON {target} TO {RenderGrantee(grantee)}{(grantOption ? WithGrantOption : string.Empty)}"));
             }
         }
 

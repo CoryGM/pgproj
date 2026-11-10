@@ -411,6 +411,7 @@ public sealed partial class ScriptGenerator
             SequenceDefinition => "sequence",
             FunctionDefinition => "function",
             ProcedureDefinition => "procedure",
+            TypeDefinition type when !SqlOperation.IsExtension(type) => "type",
             _ => null,
         };
 
@@ -458,6 +459,7 @@ public sealed partial class ScriptGenerator
                     NodeId = grant.Key,
                     NodeKind = ChangeNodeKind.Grant,
                     Node = grant,
+                    IsRestored = true,
                 });
             }
 

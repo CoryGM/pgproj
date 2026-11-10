@@ -95,6 +95,12 @@ public enum PublishNoticeKind
     /// is refused when one has no value in <see cref="PublishRequest.Variables"/>.
     /// </summary>
     Variables,
+
+    /// <summary>
+    /// The script gives <c>PUBLIC</c>, every role, a privilege on an object the database already has (G-337): a grant to <c>PUBLIC</c> the project adds, or a
+    /// type's or domain's <c>USAGE</c> given back because the project does not revoke it. A warning.
+    /// </summary>
+    PublicGrant,
 }
 
 /// <summary>One thing a warning or refusal names (G-316): an object of the model, a role, a tablespace, a feature, or a statement, so a shell can go to it.</summary>
