@@ -120,7 +120,6 @@ public sealed class InitCommandTests
             "roles and their settings (role memberships are scaffolded)",
             "text search parsers and templates (a text search configuration and a dictionary are scaffolded)",
             "tablespaces (a table's TABLESPACE clause is scaffolded)",
-            "foreign tables (foreign data wrappers, servers, and user mappings are scaffolded)",
             "subscriptions",
             "operator classes and families",
             "conversions",

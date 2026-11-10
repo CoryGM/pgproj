@@ -35,6 +35,7 @@ internal static class OwnerStatementReader
     private static readonly Dictionary<string, string> AlterTableKinds = new(StringComparer.Ordinal)
     {
         ["OBJECT_TABLE"] = "Table",
+        ["OBJECT_FOREIGN_TABLE"] = "Table",
         ["OBJECT_VIEW"] = "View",
         ["OBJECT_MATVIEW"] = "MaterializedView",
         ["OBJECT_SEQUENCE"] = "Sequence",

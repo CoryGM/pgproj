@@ -234,6 +234,12 @@ public sealed class DependencyAnalyzer
                 // already populates these on the table, so consume them here (G-08).
                 AddTableDependencies(model, table.SchemaName, table.ReferencedTables, dependencyIds);
                 AddFunctionDependencies(model, table.SchemaName, table.ReferencedFunctions, dependencyIds);
+
+                // A foreign table after its server (G-133).
+                if (table.ForeignServer is { } foreignServer && model.ForeignServers.ContainsKey(ForeignDataKeys.Server(foreignServer)))
+                {
+                    dependencyIds.Add(ForeignDataKeys.Server(foreignServer));
+                }
                 AddOperatorDependencies(model, table.Columns.SelectMany(static column => column.ReferencedOperators), dependencyIds);
                 AddCollationDependencies(model, table.SchemaName, table.Columns.Select(static column => column.CollationName), dependencyIds);
                 AddLikeDependencies(model, table, dependencyIds);

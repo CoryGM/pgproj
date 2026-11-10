@@ -159,7 +159,7 @@ public sealed partial class LiveDatabaseModelLoader
     }
 
     /// <summary>
-    /// What the database has in the scaffolded schemas that pgproj cannot read (a foreign table, a text search parser or template, an operator class or family, a conversion,
+    /// What the database has in the scaffolded schemas that pgproj cannot read (a text search parser or template, an operator class or family, a conversion,
     /// a base or shell type),
     /// and what belongs to no schema and is not read either (a foreign data wrapper, server, or user mapping, a language, a transform, an access method). The system's own
     /// (OIDs below 16384) and an extension's are left out.
@@ -168,12 +168,6 @@ public sealed partial class LiveDatabaseModelLoader
     {
         const string unsupportedSql =
             """
-            select n.nspname, 'Foreign table', c.relname
-            from pg_catalog.pg_class c
-            inner join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-            where c.relkind = 'f' and (@schemas is null or n.nspname = any(@schemas))
-              and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_class'::regclass and d.objid = c.oid and d.deptype = 'e')
-            union all
             select n.nspname, 'Text search parser', p.prsname
             from pg_catalog.pg_ts_parser p
             inner join pg_catalog.pg_namespace n on n.oid = p.prsnamespace
@@ -489,11 +483,12 @@ public sealed partial class LiveDatabaseModelLoader
 
         foreach (var table in tables.OrderBy(static table => table.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static table => table.TableName, StringComparer.OrdinalIgnoreCase))
         {
-            var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(table.SchemaName)}/Table/{SanitizeSegment(table.TableName)}.sql", usedPaths);
+            // A foreign table (G-133) in a folder of its own, with what belongs to it as for a table.
+            var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(table.SchemaName)}/{(table.ForeignServer is null ? "Table" : "ForeignTable")}/{SanitizeSegment(table.TableName)}.sql", usedPaths);
             GetOrCreateFile(relativePath).AppendLine(BuildCreateTableStatement(table, scaffold: true));
             pathByObjectKey[$"table:{table.SchemaName}.{table.TableName}()"] = relativePath;
             pathByOwnerKey[OwnerKey("table", table.SchemaName, table.TableName, string.Empty)] = relativePath;
-            Record(table.SchemaName, "Table", table.TableName, relativePath);
+            Record(table.SchemaName, table.ForeignServer is null ? "Table" : "Foreign table", table.TableName, relativePath);
         }
 
         foreach (var constraint in constraints.OrderBy(static constraint => constraint.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static constraint => constraint.TableName, StringComparer.OrdinalIgnoreCase).ThenBy(static constraint => constraint.ConstraintName, StringComparer.OrdinalIgnoreCase))

@@ -21,6 +21,7 @@ public sealed partial class PgQueryParser
         switch (objType)
         {
             case "OBJECT_TABLE":
+            case "OBJECT_FOREIGN_TABLE":
             case "OBJECT_COLUMN":
             {
                 var qualifiedNameParts = TryGetQualifiedNameParts(element, "object");
@@ -29,7 +30,7 @@ public sealed partial class PgQueryParser
                     return null;
                 }
 
-                if (objType == "OBJECT_TABLE")
+                if (objType is "OBJECT_TABLE" or "OBJECT_FOREIGN_TABLE")
                 {
                     var tableName = qualifiedNameParts[^1];
                     var schemaName = qualifiedNameParts.Count >= 2 ? qualifiedNameParts[^2] : null;

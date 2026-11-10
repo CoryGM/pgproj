@@ -91,7 +91,8 @@ public static class ForeignDataSql
         return $"ALTER USER MAPPING FOR {Role(desired.Role)} SERVER {Quote(desired.Server)} OPTIONS ({string.Join(", ", changes)});";
     }
 
-    private static void AddOptionChanges(List<string> statements, string target, IReadOnlyList<ForeignOptionDefinition> current, IReadOnlyList<ForeignOptionDefinition> desired)
+    /// <summary>The statement that turns <paramref name="current"/> options into <paramref name="desired"/> ones (<c>OPTIONS (ADD|SET|DROP ...)</c>), when they differ.</summary>
+    internal static void AddOptionChanges(List<string> statements, string target, IReadOnlyList<ForeignOptionDefinition> current, IReadOnlyList<ForeignOptionDefinition> desired)
     {
         var differences = ForeignOptions.Differences(current, desired);
         if (differences.Count == 0)

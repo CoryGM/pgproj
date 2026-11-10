@@ -1060,6 +1060,13 @@ public sealed class DiffEngine
         {
             AddValueDifference(details, nameof(TableDefinition.AccessMethod), oldTable.AccessMethod, newTable.AccessMethod, StringComparison.Ordinal);
         }
+
+        // A foreign table's server and options (G-133): by name, in no order.
+        AddValueDifference(details, nameof(TableDefinition.ForeignServer), oldTable.ForeignServer, newTable.ForeignServer, StringComparison.Ordinal);
+        if (ForeignOptions.Differences(oldTable.ForeignOptions, newTable.ForeignOptions).Count > 0)
+        {
+            AddValueDifference(details, nameof(TableDefinition.ForeignOptions), string.Join(", ", ForeignOptions.Describe(oldTable.ForeignOptions)), string.Join(", ", ForeignOptions.Describe(newTable.ForeignOptions)), StringComparison.Ordinal);
+        }
         AddValueDifference(details, nameof(TableDefinition.IsRowSecurityEnabled), oldTable.IsRowSecurityEnabled, newTable.IsRowSecurityEnabled);
         AddValueDifference(details, nameof(TableDefinition.IsRowSecurityForced), oldTable.IsRowSecurityForced, newTable.IsRowSecurityForced);
 
@@ -1188,6 +1195,12 @@ public sealed class DiffEngine
         if (ColumnDefinition.IsCompressionChange(oldColumn, newColumn))
         {
             AddOrUpdateDetail(details, nameof(ColumnDefinition.Compression), oldColumn.Compression ?? "default", newColumn.Compression);
+        }
+
+        // A foreign table's column's options (G-133).
+        if (ForeignOptions.Differences(oldColumn.ForeignOptions, newColumn.ForeignOptions).Count > 0)
+        {
+            AddOrUpdateDetail(details, nameof(ColumnDefinition.ForeignOptions), string.Join(", ", ForeignOptions.Describe(oldColumn.ForeignOptions)), string.Join(", ", ForeignOptions.Describe(newColumn.ForeignOptions)));
         }
 
         // The default is compared in its canonical form, which is equal for PostgreSQL's spelling ('x'::text) and the

@@ -25,7 +25,7 @@ public static partial class AlterTableColumnApplier
     {
         ArgumentNullException.ThrowIfNull(trees);
 
-        if (!trees.Any(static tree => tree.Nodes.Any(static node => node is AlterTableAddColumnNode or UnsupportedAlterTableNode or AlterTableRowSecurityNode or NotNullConstraintNode or AlterTableColumnDefaultNode or AlterTableAddIdentityNode or AlterTableColumnStorageNode or AlterTableAttachPartitionNode or AlterSequenceOwnedByNode or AlterIndexAttachPartitionNode or AlterTableObjectStateNode or AlterTableClusterOnNode or AlterTableReplicaIdentityNode)))
+        if (!trees.Any(static tree => tree.Nodes.Any(static node => node is AlterTableAddColumnNode or UnsupportedAlterTableNode or AlterTableRowSecurityNode or NotNullConstraintNode or AlterTableColumnDefaultNode or AlterTableAddIdentityNode or AlterTableColumnStorageNode or AlterTableColumnOptionsNode or AlterTableAttachPartitionNode or AlterSequenceOwnedByNode or AlterIndexAttachPartitionNode or AlterTableObjectStateNode or AlterTableClusterOnNode or AlterTableReplicaIdentityNode)))
         {
             return trees;
         }
@@ -106,6 +106,10 @@ public static partial class AlterTableColumnApplier
                         ApplyColumnChange(columnStorage.TableName, columnStorage.SchemaName, columnStorage.ColumnName, columnStorage.Storage is not null ? "SET STORAGE" : "SET COMPRESSION", treeIndex, tables, nodesByTree, diagnosticsByTree,
                             column => column with { Storage = columnStorage.Storage ?? column.Storage, IsStorageSetByAlter = columnStorage.Storage is not null || column.IsStorageSetByAlter, Compression = columnStorage.Compression ?? column.Compression });
                         break;
+                    case AlterTableColumnOptionsNode columnOptions:
+                        ApplyColumnChange(columnOptions.TableName, columnOptions.SchemaName, columnOptions.ColumnName, "OPTIONS", treeIndex, tables, nodesByTree, diagnosticsByTree,
+                            column => column with { ForeignOptions = ForeignOptionChange.Apply(column.ForeignOptions, columnOptions.Changes) });
+                        break;
                     case AlterTableAttachPartitionNode attach:
                         ApplyAttachPartition(attach, treeIndex, tables, nodesByTree, diagnosticsByTree);
                         break;
@@ -167,7 +171,7 @@ public static partial class AlterTableColumnApplier
         {
             result.Add(trees[treeIndex] with
             {
-                Nodes = nodesByTree[treeIndex].Where(static node => node is not (AlterTableAddColumnNode or UnsupportedAlterTableNode or AlterTableRowSecurityNode or NotNullConstraintNode or AlterTableColumnDefaultNode or AlterTableAddIdentityNode or AlterTableColumnStorageNode or AlterTableAttachPartitionNode or AlterSequenceOwnedByNode or AlterIndexAttachPartitionNode or AlterTableObjectStateNode or AlterTableClusterOnNode or AlterTableReplicaIdentityNode)).ToArray(),
+                Nodes = nodesByTree[treeIndex].Where(static node => node is not (AlterTableAddColumnNode or UnsupportedAlterTableNode or AlterTableRowSecurityNode or NotNullConstraintNode or AlterTableColumnDefaultNode or AlterTableAddIdentityNode or AlterTableColumnStorageNode or AlterTableColumnOptionsNode or AlterTableAttachPartitionNode or AlterSequenceOwnedByNode or AlterIndexAttachPartitionNode or AlterTableObjectStateNode or AlterTableClusterOnNode or AlterTableReplicaIdentityNode)).ToArray(),
                 Diagnostics = diagnosticsByTree[treeIndex],
             });
         }

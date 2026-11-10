@@ -77,6 +77,9 @@ internal static class DiffPropertyLabels
         ["EnumLabels"] = "Labels",
         // A base type's CREATE TYPE (...) options (G-267).
         ["BaseTypeOptions"] = "Options",
+        // A foreign table's server and options, and a column's options (G-133).
+        ["ForeignServer"] = "Server",
+        ["ForeignOptions"] = "Options",
         ["ExtensionVersion"] = "Version",
         ["LcCollate"] = "LC_COLLATE",
         ["LcCtype"] = "LC_CTYPE",

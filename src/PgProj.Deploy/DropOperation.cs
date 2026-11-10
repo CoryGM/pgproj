@@ -9,7 +9,7 @@ public sealed record class DropOperation : SqlOperation
     public override string GenerateSql()
         => Node switch
         {
-            TableDefinition table => $"DROP TABLE {FormatQualifiedName(table.SchemaName, table.Name)};",
+            TableDefinition table => $"DROP {(table.IsForeign ? "FOREIGN TABLE" : "TABLE")} {FormatQualifiedName(table.SchemaName, table.Name)};",
             ViewDefinition view => view.IsMaterialized
                 ? $"DROP MATERIALIZED VIEW {FormatQualifiedName(view.SchemaName, view.Name)};"
                 : $"DROP VIEW {FormatQualifiedName(view.SchemaName, view.Name)};",

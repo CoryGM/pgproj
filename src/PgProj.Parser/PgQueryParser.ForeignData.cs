@@ -108,11 +108,59 @@ public sealed partial class PgQueryParser
         return role is null ? null : new UserMappingNode(role, server) { Options = ReadOptions(element) };
     }
 
-    /// <summary>The <c>options</c> of a foreign data statement, each a <c>DefElem</c> whose argument is a string, in the order written.</summary>
-    private static List<ForeignOptionNode> ReadOptions(JsonElement element)
+    /// <summary>
+    /// A <c>CreateForeignTableStmt</c> (G-133): its <c>base</c>, a <c>CreateStmt</c>, read as a table is, then its <c>servername</c> and <c>options</c>; each column's
+    /// <c>fdwoptions</c> are read with the column.
+    /// </summary>
+    private static TableNode? TryCreateForeignTableNode(JsonElement element, string statementSql, int statementOffset, out JsonElement createStatement)
+    {
+        createStatement = default;
+        if (!TryGetDirectProperty(element, "base", out createStatement) || TryGetDirectStringProperty(element, "servername") is not { Length: > 0 } server)
+        {
+            return null;
+        }
+
+        return TryCreateTableNode(createStatement, statementSql, statementOffset) is { } table
+            ? table with { ForeignServer = server, ForeignOptions = ReadOptions(element) }
+            : null;
+    }
+
+    /// <summary>
+    /// The changes of an <c>ALTER ... OPTIONS (...)</c> list (G-133), its <c>DefElem</c>s in a <c>List</c>, each with its <c>defaction</c>: <c>DEFELEM_SET</c> and
+    /// <c>DEFELEM_DROP</c>, and <c>ADD</c> for <c>DEFELEM_ADD</c> or none.
+    /// </summary>
+    private static List<ForeignOptionChange> ReadOptionChanges(JsonElement definition)
+    {
+        var changes = new List<ForeignOptionChange>();
+        var items = definition.TryGetProperty("List", out var list) && list.TryGetProperty("items", out var listItems) ? listItems : definition;
+        if (items.ValueKind != JsonValueKind.Array)
+        {
+            return changes;
+        }
+
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.TryGetProperty("DefElem", out var option) && TryGetDirectStringProperty(option, "defname") is { } name)
+            {
+                var value = option.TryGetProperty("arg", out var argument) && argument.TryGetProperty("String", out var text) && text.TryGetProperty("sval", out var sval) ? sval.GetString() : null;
+                var action = TryGetDirectStringProperty(option, "defaction") switch
+                {
+                    "DEFELEM_SET" => "SET",
+                    "DEFELEM_DROP" => "DROP",
+                    _ => "ADD",
+                };
+                changes.Add(new ForeignOptionChange(action, new ForeignOptionNode(name, value)));
+            }
+        }
+
+        return changes;
+    }
+
+    /// <summary>The <c>options</c> (or <paramref name="propertyName"/>) of a foreign data statement, each a <c>DefElem</c> whose argument is a string, in the order written.</summary>
+    private static List<ForeignOptionNode> ReadOptions(JsonElement element, string propertyName = "options")
     {
         var options = new List<ForeignOptionNode>();
-        if (!TryGetDirectProperty(element, "options", out var list) || list.ValueKind != JsonValueKind.Array)
+        if (!TryGetDirectProperty(element, propertyName, out var list) || list.ValueKind != JsonValueKind.Array)
         {
             return options;
         }

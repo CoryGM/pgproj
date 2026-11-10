@@ -8,6 +8,7 @@ public sealed class SemanticPipeline
     private readonly ColumnPass _columnPass = new();
     private readonly PartitionColumnInheritancePass _partitionColumnInheritancePass = new();
     private readonly TableInheritancePass _tableInheritancePass = new();
+    private readonly ForeignTableCheckPass _foreignTableCheckPass = new();
     private readonly InheritedColumnDefaultPass _inheritedColumnDefaultPass = new();
     private readonly ConstraintPass _constraintPass = new();
     private readonly ExpressionMappingPass _expressionMappingPass = new();
@@ -114,6 +115,8 @@ public sealed class SemanticPipeline
         model = _procedureIdentityPass.Execute(model);
         _semanticDiffNormalizationPass.Execute(model);
         _functionSignatureValidationPass.Execute(model);
+        // What PostgreSQL refuses on a foreign table (G-133), reported here.
+        _foreignTableCheckPass.Execute(model);
         _semanticCyclePass.Execute(model);
         _semanticGraphPass.Execute(model);
         _semanticCycleExplanationPass.Execute(model);

@@ -32,7 +32,7 @@ public sealed partial class LiveDatabaseModelLoader
                    n.nspname, c.relname, '', null, null, pg_catalog.pg_get_userbyid(c.relowner)
             from pg_catalog.pg_class c
             inner join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-            where c.relkind in ('r', 'p', 'v', 'm', 'S')
+            where c.relkind in ('r', 'p', 'v', 'm', 'S', 'f')
               and n.nspname not like 'pg\_%' and n.nspname <> 'information_schema'
             union all
             select case p.prokind when 'p' then 'procedure' when 'a' then 'aggregate' else 'function' end,

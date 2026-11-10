@@ -949,6 +949,8 @@ internal sealed class DeclarationPass
             ResolvedFunctions: [])
         {
             DeclarationNode = tableNode,
+            ForeignServer = tableNode.ForeignServer,
+            ForeignOptions = ForeignOptionDefinition.From(tableNode.ForeignOptions),
             IsUnlogged = tableNode.IsUnlogged,
             TablespaceName = tableNode.TablespaceName,
             AccessMethod = tableNode.AccessMethod,

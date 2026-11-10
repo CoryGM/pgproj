@@ -213,16 +213,22 @@ public sealed partial class ScriptGenerator
     private static Dictionary<string, IReadOnlyList<string>> FindChangedObjectsInUse(IEnumerable<ModifiedChange> modifiedChanges, DependencyGraph graph)
     {
         var inUse = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var change in modifiedChanges.Where(static change => (change.NewNode is CollationDefinition or TextSearchDictionaryDefinition or TextSearchConfigurationDefinition or TypeDefinition { EnumLabels.Count: > 0 } or TypeDefinition { IsBaseType: true } || IsDomainCollationChange(change))
+        foreach (var change in modifiedChanges.Where(static change => (change.NewNode is CollationDefinition or TextSearchDictionaryDefinition or TextSearchConfigurationDefinition or TypeDefinition { EnumLabels.Count: > 0 } or TypeDefinition { IsBaseType: true } or TableDefinition or ForeignServerDefinition || IsDomainCollationChange(change))
                      && IsDropAndRecreateObject(change)))
         {
             // A routine, view, or other object that uses an enum is dropped and created again around it; what cannot be is a table (its columns) or another type.
             // A base type is rebuilt only when nothing uses it but its own support functions, which it is dropped and created again with, and what is put back on it
             // (G-267, the user's design of 2026-11-09, item 3: a rebuild under columns would be a later gap).
             var users = graph.GetDependents(change.NodeId)
-                .Where(node => change.NewNode is TypeDefinition { IsBaseType: true } baseType
-                    ? !IsOwnSupportFunction(node.SemanticNode, baseType) && node.SemanticNode is not (GrantDefinition or OwnerDefinition)
-                    : change.NewNode is not TypeDefinition || node.SemanticNode is TableDefinition or ColumnDefinition or TypeDefinition)
+                .Where(node => change.NewNode switch
+                {
+                    TypeDefinition { IsBaseType: true } baseType => !IsOwnSupportFunction(node.SemanticNode, baseType) && node.SemanticNode is not (GrantDefinition or OwnerDefinition),
+                    // A foreign table moved to another server is dropped and created with what is on it (G-133); anything else that uses it refuses the move.
+                    TableDefinition table => !IsCarriedWithForeignTable(node.SemanticNode, table),
+                    // A server dropped and created again (G-132) takes its user mappings with it; a foreign table on it refuses the change (G-133).
+                    ForeignServerDefinition => node.SemanticNode is TableDefinition,
+                    _ => change.NewNode is not TypeDefinition || node.SemanticNode is TableDefinition or ColumnDefinition or TypeDefinition,
+                })
                 .Select(static node => node.NodeId)
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -234,6 +240,17 @@ public sealed partial class ScriptGenerator
 
         return inUse;
     }
+
+    /// <summary>What a foreign table is dropped and created with when it moves to another server (G-133): its columns and constraints, triggers, statistics, grants, and owner.</summary>
+    internal static bool IsCarriedWithForeignTable(ISemanticNode node, TableDefinition table)
+        => node switch
+        {
+            ColumnDefinition or GrantDefinition or OwnerDefinition => true,
+            ConstraintDefinition constraint => string.Equals(DatabaseModel.CreateKey(constraint.SchemaName, constraint.TableName ?? string.Empty), table.Key, StringComparison.OrdinalIgnoreCase),
+            TriggerDefinition trigger => string.Equals(DatabaseModel.CreateKey(trigger.SchemaName, trigger.TableName ?? string.Empty), table.Key, StringComparison.OrdinalIgnoreCase),
+            StatisticsDefinition => true,
+            _ => false,
+        };
 
     /// <summary>True when <paramref name="node"/> is one of the functions <paramref name="baseType"/> names (G-267): its input, output, or another support function.</summary>
     internal static bool IsOwnSupportFunction(ISemanticNode node, TypeDefinition baseType)
@@ -256,6 +273,27 @@ public sealed partial class ScriptGenerator
                 NodeKind = change.NodeKind,
                 Message = $"The domain {change.NodeId} changes its collation, but PostgreSQL cannot do that in place and refuses to drop a domain that {userList} use{(users.Count == 1 ? "s" : string.Empty)}. "
                     + "pgproj does not rebuild what uses it: create the domain under a new name with the new collation, change those columns to it (ALTER COLUMN ... TYPE new_domain), drop the old domain, and rename the new one.",
+            };
+        }
+
+        if (change.NewNode is TableDefinition table)
+        {
+            return new BlockedOperation
+            {
+                NodeId = change.NodeId,
+                NodeKind = change.NodeKind,
+                Message = $"The foreign table {change.NodeId} {(table.IsForeign && change.OldNode is TableDefinition { IsForeign: true } ? "moves to another server" : table.IsForeign ? "becomes a foreign table" : "stops being a foreign table")}, which PostgreSQL cannot do in place, so it would have to be dropped and created again, and {userList} use{(users.Count == 1 ? "s" : string.Empty)} it. "
+                    + "pgproj does not rebuild what uses a foreign table: change those objects first, or make the change by hand.",
+            };
+        }
+
+        if (change.NewNode is ForeignServerDefinition)
+        {
+            return new BlockedOperation
+            {
+                NodeId = change.NodeId,
+                NodeKind = change.NodeKind,
+                Message = $"The server {change.NodeId} changes its wrapper or TYPE, which PostgreSQL cannot do in place, so it would have to be dropped and created again, and the foreign table{(users.Count == 1 ? string.Empty : "s")} {userList} {(users.Count == 1 ? "is" : "are")} on it. Make the change by hand, or move the foreign tables first.",
             };
         }
 

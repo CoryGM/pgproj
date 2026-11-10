@@ -59,12 +59,15 @@ internal static class UnmodeledStatementReader
         "CreateFdwStmt",
         "CreateForeignServerStmt",
         "CreateUserMappingStmt",
+        // Foreign tables (G-133); IMPORT FOREIGN SCHEMA is still reported: a project states its tables.
+        "CreateForeignTableStmt",
     };
 
     /// <summary>The object kinds a <c>COMMENT ON</c> is read for (<c>PgQueryParser.TryCreateObjectCommentNode</c>).</summary>
     private static readonly HashSet<string> ModeledCommentTargets = new(StringComparer.Ordinal)
     {
         "OBJECT_TABLE",
+        "OBJECT_FOREIGN_TABLE",
         "OBJECT_COLUMN",
         "OBJECT_VIEW",
         "OBJECT_MATVIEW",
@@ -111,7 +114,6 @@ internal static class UnmodeledStatementReader
         ["AlterFdwStmt"] = "ALTER FOREIGN DATA WRAPPER",
         ["AlterForeignServerStmt"] = "ALTER SERVER",
         ["AlterUserMappingStmt"] = "ALTER USER MAPPING",
-        ["CreateForeignTableStmt"] = "CREATE FOREIGN TABLE",
         ["ImportForeignSchemaStmt"] = "IMPORT FOREIGN SCHEMA",
         ["CreateRoleStmt"] = "CREATE ROLE",
         ["AlterRoleStmt"] = "ALTER ROLE",
@@ -209,8 +211,8 @@ internal static class UnmodeledStatementReader
                 // (per action, G-47); for every other kind nothing is, and calling it a table (as G-47's warning did) misleads.
                 var alterObjectKind = String(body, "objtype");
                 // The one thing read for a view, materialized view, or sequence is its owner (G-146), when that is all the statement does.
-                // ALTER INDEX ... ATTACH PARTITION is modeled (G-236), and so is a view column's SET|DROP DEFAULT (G-291).
-                return alterObjectKind is null or "OBJECT_TABLE" || OwnerStatementReader.IsReadOwnerOnlyAlterTable(body) || PgQueryParser.IsAlterIndexAttachPartition(body) || PgQueryParser.IsAlterViewColumnDefault(body)
+                // ALTER INDEX ... ATTACH PARTITION is modeled (G-236), and so is a view column's SET|DROP DEFAULT (G-291). A foreign table's actions are read as a table's (G-133).
+                return alterObjectKind is null or "OBJECT_TABLE" or "OBJECT_FOREIGN_TABLE" || OwnerStatementReader.IsReadOwnerOnlyAlterTable(body) || PgQueryParser.IsAlterIndexAttachPartition(body) || PgQueryParser.IsAlterViewColumnDefault(body)
                     ? null
                     : new Finding($"ALTER {ObjectKind(alterObjectKind)}", Ignored);
             case "AlterTSConfigurationStmt":

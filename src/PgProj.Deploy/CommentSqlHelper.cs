@@ -8,12 +8,12 @@ namespace PgProj.Deploy;
 /// </summary>
 internal static class CommentSqlHelper
 {
-    public static string? GenerateTableComment(string? schemaName, string tableName, string? comment)
+    public static string? GenerateTableComment(string? schemaName, string tableName, string? comment, bool isForeign = false)
     {
         var qualifiedName = FormatQualifiedName(schemaName, tableName);
         return comment is null
             ? null
-            : $"COMMENT ON TABLE {qualifiedName} IS {QuoteLiteral(comment)};";
+            : $"COMMENT ON {(isForeign ? "FOREIGN TABLE" : "TABLE")} {qualifiedName} IS {QuoteLiteral(comment)};";
     }
 
     public static string GenerateColumnComment(string? schemaName, string tableName, string columnName, string? comment)
@@ -106,8 +106,8 @@ internal static class CommentSqlHelper
     public static string GenerateReplicaIdentityUsingIndex(string? schemaName, string tableName, string indexName)
         => $"ALTER TABLE {FormatQualifiedName(schemaName, tableName)} REPLICA IDENTITY USING INDEX {QuoteIdentifier(indexName)};";
 
-    public static string GenerateTableCommentClear(string? schemaName, string tableName)
-        => $"COMMENT ON TABLE {FormatQualifiedName(schemaName, tableName)} IS NULL;";
+    public static string GenerateTableCommentClear(string? schemaName, string tableName, bool isForeign = false)
+        => $"COMMENT ON {(isForeign ? "FOREIGN TABLE" : "TABLE")} {FormatQualifiedName(schemaName, tableName)} IS NULL;";
 
     public static string? GenerateViewComment(string? schemaName, string viewName, bool isMaterialized, string? comment)
         => comment is null

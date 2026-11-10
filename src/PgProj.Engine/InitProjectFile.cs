@@ -11,14 +11,13 @@ internal static partial class InitProjectFile
     /// What <c>init</c> can't read: every kind of object a live database can hold that the live loader does not read (G-152). One entry per
     /// kind, so that the gap that models a kind (G-146 to G-151, G-132, G-133, G-135) removes its entry here, and so a test can check that each
     /// one is shown. Row-level security and domain structure were listed until G-76 and G-77 made both work end to end (G-108); typed tables,
-    /// aggregates, operators, casts, rules, event triggers, and publications are read and are not listed.
+    /// aggregates, operators, casts, rules, event triggers, publications, foreign data (G-132), and foreign tables (G-133) are read and are not listed.
     /// </summary>
     internal static readonly string[] UnreadObjectKinds =
     [
         "roles and their settings (role memberships are scaffolded)",
         "text search parsers and templates (a text search configuration and a dictionary are scaffolded)",
         "tablespaces (a table's TABLESPACE clause is scaffolded)",
-        "foreign tables (foreign data wrappers, servers, and user mappings are scaffolded)",
         "subscriptions",
         "operator classes and families",
         "conversions",

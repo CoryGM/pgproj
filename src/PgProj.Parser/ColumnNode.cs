@@ -109,4 +109,7 @@ public sealed record ColumnNode(
         get => _typeRange.Value;
         init => _typeRange = new PlaceSlot<SourceRange>(value);
     }
+
+    /// <summary>A foreign table's column's <c>OPTIONS (...)</c> (<c>column_name</c>, ...), in the order written (G-133); empty for any other table's.</summary>
+    public IReadOnlyList<ForeignOptionNode> ForeignOptions { get; init; } = [];
 }

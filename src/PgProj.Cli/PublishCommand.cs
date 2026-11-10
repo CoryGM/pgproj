@@ -32,7 +32,7 @@ public static class PublishCommand
         };
         var allowDestructiveOption = new Option<bool>("--allow-destructive")
         {
-            Description = "Allow --execute to run a script that can discard data or access: a dropped table, column, " +
+            Description = "Allow --execute to run a script that can discard data or access: a dropped table (a foreign table too), column, " +
                 "materialized view, extension, or composite type field; a changed column type that can lose a value (a widening such as varchar(50) " +
                 "to varchar(100) or int to bigint is not one); a label removed from an enum type that columns use; a field of a composite type that " +
                 "columns use changed to a type that can lose a value; a cast, operator, aggregate, " +

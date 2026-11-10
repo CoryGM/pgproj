@@ -132,6 +132,7 @@ internal static class SearchPathQualifier
                 AlterTableColumnDefaultNode columnDefault => columnDefault with { SchemaName = OnTable(columnDefault, columnDefault.TableName) },
                 AlterTableAddIdentityNode addIdentity => addIdentity with { SchemaName = OnTable(addIdentity, addIdentity.TableName) },
                 AlterTableColumnStorageNode columnStorage => columnStorage with { SchemaName = OnTable(columnStorage, columnStorage.TableName) },
+                AlterTableColumnOptionsNode columnOptions => columnOptions with { SchemaName = OnTable(columnOptions, columnOptions.TableName) },
                 AlterTableAttachPartitionNode attach => attach with
                 {
                     SchemaName = OnTable(attach, attach.TableName),

@@ -99,7 +99,7 @@ public sealed record class OperationBatch
         // check only guards a grant/role membership that disappears with nothing replacing it).
         var recreatedNodeIds = Operations
             .OfType<CreateOperation>()
-            .Where(static create => create.NodeKind is ChangeNodeKind.Grant or ChangeNodeKind.EventTrigger or ChangeNodeKind.Cast or ChangeNodeKind.Operator or ChangeNodeKind.Rule or ChangeNodeKind.Aggregate or ChangeNodeKind.Publication or ChangeNodeKind.ForeignServer or ChangeNodeKind.UserMapping)
+            .Where(static create => create.NodeKind is ChangeNodeKind.Grant or ChangeNodeKind.EventTrigger or ChangeNodeKind.Cast or ChangeNodeKind.Operator or ChangeNodeKind.Rule or ChangeNodeKind.Aggregate or ChangeNodeKind.Publication or ChangeNodeKind.ForeignServer or ChangeNodeKind.UserMapping || create.Node is TableDefinition { IsForeign: true })
             .Select(static create => create.NodeId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -132,6 +132,12 @@ public sealed record class OperationBatch
     private static DestructiveOperation? ClassifyDestructive(SqlOperation operation, IReadOnlySet<string> recreatedNodeIds, IReadOnlySet<string> newObjectKeys)
         => operation switch
         {
+            // A foreign table keeps no rows here, but dropping one stops every query that reads it (G-133, the user's choice of 2026-11-10); one dropped to move it
+            // to another server, and created again, is not.
+            DropOperation { Node: TableDefinition { IsForeign: true } } drop when recreatedNodeIds.Contains(drop.NodeId)
+                => null,
+            DropOperation { Node: TableDefinition { IsForeign: true } table } drop
+                => new DestructiveOperation { Operation = drop, Reasons = [$"foreign table dropped; every query that reads {table.Name} stops working (its rows are the server {table.ForeignServer}'s)"] },
             DropOperation { Node: TableDefinition } drop
                 => new DestructiveOperation { Operation = drop, Reasons = ["table dropped"] },
             // An enum type rebuilt under its columns that loses a label (G-191, decision 2): a row holding it cannot be kept; the move then fails and the
@@ -194,7 +200,8 @@ public sealed record class OperationBatch
                     Reasons = [$"owner of {newOwner.ObjectKind} {newOwner.ObjectKey} changes from {oldOwner.OwnerRole} to {newOwner.OwnerRole}; {oldOwner.OwnerRole} loses the privileges it had as the owner"],
                 },
             AlterOperation { Change.OldNode: TableDefinition oldTable, Change.NewNode: TableDefinition newTable } alter
-                => AlterOperation.GetDestructiveColumnReasons(oldTable, newTable) is { Count: > 0 } reasons
+                // A foreign table's column holds no rows here: dropping or retyping one loses nothing (G-133).
+                => !newTable.IsForeign && AlterOperation.GetDestructiveColumnReasons(oldTable, newTable) is { Count: > 0 } reasons
                     ? new DestructiveOperation { Operation = alter, Reasons = reasons }
                     : null,
             AlterOperation { Change.OldNode: TypeDefinition oldType, Change.NewNode: TypeDefinition newType } alter

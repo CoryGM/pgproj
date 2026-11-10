@@ -65,10 +65,11 @@ public sealed class InitCommandEndToEndTests
             var initResult = await RunAsync("init", "--project", projectFile, "--output", Path.Combine(projectDirectory, "sql"), "--source-connection", connectionString);
             Assert.AreEqual(0, initResult.ExitCode, "init failed.\n" + initResult.Output);
 
-            // A run says what it cannot read, as the help does (G-152): roles and foreign data wrappers stand for the kinds that were once left out unmentioned.
+            // A run says what it cannot read, as the help does (G-152): roles and subscriptions stand for the kinds that were once left out unmentioned (foreign tables, the example until G-133, are read).
             StringAssert.Contains(initResult.Output, "Not read by pgproj, so absent from the scaffolded project");
             StringAssert.Contains(initResult.Output, "roles and their settings (role memberships are scaffolded)");
-            StringAssert.Contains(initResult.Output, "foreign data wrappers");
+            StringAssert.Contains(initResult.Output, "  - subscriptions");
+            Assert.IsFalse(initResult.Output.Contains("foreign tables", StringComparison.Ordinal), initResult.Output);
 
             // The scaffolded files land where the layout promises: one file per object, grouped like samples/MultiSchema.
             Assert.IsTrue(File.Exists(Path.Combine(projectDirectory, "sql", "Schema", "public", "public.sql")));

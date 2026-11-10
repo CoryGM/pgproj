@@ -634,6 +634,12 @@ public sealed record class AlterOperation : SqlOperation
 
         var statements = new List<string>();
 
+        // A foreign table's own options, in place (G-133); a changed server drops and creates it instead.
+        if (newTable.IsForeign && oldTable.IsForeign)
+        {
+            ForeignDataSql.AddOptionChanges(statements, $"ALTER FOREIGN TABLE {qualifiedName}", oldTable.ForeignOptions, newTable.ForeignOptions);
+        }
+
         if (details.Any(static detail => detail.PropertyName == nameof(TableDefinition.WithoutCluster)))
         {
             statements.Add(CommentSqlHelper.GenerateWithoutCluster(newTable.SchemaName, newTable.Name));
@@ -855,6 +861,12 @@ public sealed record class AlterOperation : SqlOperation
             {
                 statements.Add($"ALTER TABLE {qualifiedName} ALTER COLUMN {QuoteIdentifier(newColumn.Name)} SET COMPRESSION {newColumn.Compression};");
             }
+
+            // A foreign table's column's options, in place (G-133).
+            if (newTable.IsForeign)
+            {
+                ForeignDataSql.AddOptionChanges(statements, $"ALTER FOREIGN TABLE {qualifiedName} ALTER COLUMN {QuoteIdentifier(newColumn.Name)}", oldColumn.ForeignOptions, newColumn.ForeignOptions);
+            }
         }
 
         // Storage parameters (G-24b): a changed or added option is SET, a removed one is RESET back to its default; PostgreSQL
@@ -944,8 +956,8 @@ public sealed record class AlterOperation : SqlOperation
         if (!string.Equals(oldTable.Comment, newTable.Comment, StringComparison.Ordinal))
         {
             statements.Add(newTable.Comment is null
-                ? CommentSqlHelper.GenerateTableCommentClear(newTable.SchemaName, newTable.Name)
-                : CommentSqlHelper.GenerateTableComment(newTable.SchemaName, newTable.Name, newTable.Comment)!);
+                ? CommentSqlHelper.GenerateTableCommentClear(newTable.SchemaName, newTable.Name, newTable.IsForeign)
+                : CommentSqlHelper.GenerateTableComment(newTable.SchemaName, newTable.Name, newTable.Comment, newTable.IsForeign)!);
         }
 
         return statements.Count == 0

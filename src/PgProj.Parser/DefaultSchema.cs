@@ -85,6 +85,7 @@ public static class DefaultSchema
                 AlterTableColumnDefaultNode columnDefault => columnDefault with { SchemaName = Or(columnDefault.SchemaName) },
                 AlterTableAddIdentityNode addIdentity => addIdentity with { SchemaName = Or(addIdentity.SchemaName) },
                 AlterTableColumnStorageNode columnStorage => columnStorage with { SchemaName = Or(columnStorage.SchemaName) },
+                AlterTableColumnOptionsNode columnOptions => columnOptions with { SchemaName = Or(columnOptions.SchemaName) },
                 AlterTableAttachPartitionNode attach => attach with
                 {
                     SchemaName = Or(attach.SchemaName),

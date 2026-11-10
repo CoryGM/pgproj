@@ -96,6 +96,47 @@ public sealed record AlterTableColumnStorageNode(
     string? Compression) : SqlNode("AlterTableColumnStorage", TableName, SchemaName);
 
 /// <summary>
+/// <c>ALTER FOREIGN TABLE ... ALTER COLUMN c OPTIONS ([ADD | SET | DROP] name ['value'], ...)</c>, the way <c>pg_dump</c> writes a foreign table's column options (G-133). A transient
+/// marker: the applier changes the column's options, each change in the order written.
+/// </summary>
+public sealed record AlterTableColumnOptionsNode(
+    string? TableName,
+    string? SchemaName,
+    string ColumnName,
+    IReadOnlyList<ForeignOptionChange> Changes) : SqlNode("AlterTableColumnOptions", TableName, SchemaName);
+
+/// <summary>One change of an <c>OPTIONS (...)</c> list in an <c>ALTER</c>: <see cref="Action"/> is <c>ADD</c> (also an option written without one), <c>SET</c>, or <c>DROP</c> (G-133).</summary>
+public sealed record ForeignOptionChange(string Action, ForeignOptionNode Option)
+{
+    /// <summary>The options <paramref name="options"/> become after <paramref name="changes"/>: an added or set option replaces one of its name in its place, or is appended; a dropped one is removed.</summary>
+    public static IReadOnlyList<ForeignOptionNode> Apply(IReadOnlyList<ForeignOptionNode> options, IReadOnlyList<ForeignOptionChange> changes)
+    {
+        var result = options.ToList();
+        foreach (var change in changes)
+        {
+            var index = result.FindIndex(option => string.Equals(option.Name, change.Option.Name, StringComparison.Ordinal));
+            if (change.Action == "DROP")
+            {
+                if (index >= 0)
+                {
+                    result.RemoveAt(index);
+                }
+            }
+            else if (index >= 0)
+            {
+                result[index] = change.Option;
+            }
+            else
+            {
+                result.Add(change.Option);
+            }
+        }
+
+        return result;
+    }
+}
+
+/// <summary>
 /// <c>ALTER TABLE [ONLY] parent ATTACH PARTITION child FOR VALUES ... | DEFAULT</c> (G-236), the way <c>pg_dump</c> writes every partition. A transient marker: the applier makes the
 /// child a partition of the parent, with the bound, before the semantic passes run. <see cref="TableName"/> is the parent.
 /// </summary>

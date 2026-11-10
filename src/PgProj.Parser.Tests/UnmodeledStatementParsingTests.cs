@@ -178,12 +178,34 @@ public sealed class UnmodeledStatementParsingTests
     }
 
     [TestMethod]
-    public void AForeignTablesColumnsNoLongerLeakIntoTheModel()
+    public void AForeignTableIsATableWithItsServerAndNoWarning()
     {
+        // Modeled since G-133 (until then, reported and ignored): its columns are the table's, with its server.
         var tree = Parse("CREATE FOREIGN TABLE public.ft (a int, b text) SERVER s;");
 
+        var table = tree.Nodes.OfType<TableNode>().Single();
+        Assert.AreEqual("s", table.ForeignServer);
+        CollectionAssert.AreEqual(new[] { "a", "b" }, table.Columns.Select(static column => column.Name).ToArray());
+        Assert.IsEmpty(tree.Diagnostics);
+    }
+
+    [TestMethod]
+    public void ImportForeignSchemaIsStillReported()
+    {
+        var tree = Parse("IMPORT FOREIGN SCHEMA remote FROM SERVER s INTO public;");
+
         Assert.IsEmpty(tree.Nodes);
-        StringAssert.StartsWith(tree.Diagnostics.Single().Message, "CREATE FOREIGN TABLE is not modeled");
+        StringAssert.StartsWith(tree.Diagnostics.Single().Message, "IMPORT FOREIGN SCHEMA is not modeled");
+    }
+
+    [TestMethod]
+    public void AnAlterForeignTableIsReadAsATablesActions()
+    {
+        // Until G-133 an ALTER FOREIGN TABLE was reported as a whole; now its actions are a table's, an unread one warned about by the applier.
+        var tree = Parse("ALTER FOREIGN TABLE public.ft ADD COLUMN b int;");
+
+        Assert.AreEqual("b", tree.Nodes.OfType<AlterTableAddColumnNode>().Single().Column.Name);
+        Assert.IsEmpty(tree.Diagnostics);
     }
 
     [TestMethod]
@@ -217,7 +239,6 @@ public sealed class UnmodeledStatementParsingTests
     [DataRow("ALTER VIEW public.v SET (security_barrier = true);", "ALTER VIEW")]
     [DataRow("ALTER MATERIALIZED VIEW public.mv SET (fillfactor = 50);", "ALTER MATERIALIZED VIEW")]
     [DataRow("ALTER TYPE public.comp ADD ATTRIBUTE y int;", "ALTER TYPE")]
-    [DataRow("ALTER FOREIGN TABLE public.ft ADD COLUMN b int;", "ALTER FOREIGN TABLE")]
     [DataRow("ALTER INDEX public.i SET (fillfactor = 50);", "ALTER INDEX")]
     public void AnAlterOfSomethingOtherThanATableIsNamedForWhatItIs(string sql, string kind)
     {

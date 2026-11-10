@@ -1123,6 +1123,16 @@ public sealed partial class LiveDatabaseModelLoader
             ? string.Empty
             : $"{Environment.NewLine}PARTITION BY {table.PartitionKeyDef}";
 
+        // A foreign table (G-133) has none of PARTITION BY, USING, WITH, or TABLESPACE; its SERVER and OPTIONS go where USING would.
+        if (table.ForeignServer is { } foreignServer)
+        {
+            unlogged = "FOREIGN ";
+            partitionByClause = string.Empty;
+            withClause = string.Empty;
+            tablespaceClause = string.Empty;
+            usingClause = $"{Environment.NewLine}SERVER {RenderIdentifier(foreignServer)}{RenderOptions(table.ForeignOptions, null)}";
+        }
+
         string createTable;
         if (!string.IsNullOrEmpty(table.PartitionOfTableName) && table.Columns.Any(static column => column.PartitionNotNullDiffers || column.PartitionOrderDiffers))
         {
@@ -1201,7 +1211,7 @@ public sealed partial class LiveDatabaseModelLoader
 
         if (!string.IsNullOrEmpty(table.Comment))
         {
-            trailingStatements.Add($"COMMENT ON TABLE {QualifyIdentifier(table.SchemaName, table.TableName)} IS {QuoteLiteral(table.Comment)};");
+            trailingStatements.Add($"COMMENT ON {(table.ForeignServer is null ? "TABLE" : "FOREIGN TABLE")} {QualifyIdentifier(table.SchemaName, table.TableName)} IS {QuoteLiteral(table.Comment)};");
         }
 
         trailingStatements.AddRange(table.Columns
@@ -1302,6 +1312,9 @@ public sealed partial class LiveDatabaseModelLoader
             builder.Append(" COMPRESSION ").Append(column.Compression);
         }
 
+        // A foreign table column's options (G-133), where CREATE FOREIGN TABLE takes them.
+        builder.Append(RenderOptions(column.ForeignOptions, null));
+
         if (!string.IsNullOrWhiteSpace(column.CollationName))
         {
             builder.Append(" COLLATE ").Append(column.CollationName);
@@ -1370,10 +1383,17 @@ public sealed partial class LiveDatabaseModelLoader
                     where parent_inh.inhrelid = cls.oid and not cls.relispartition) as inherits_from,
                    am.amname as access_method,
                    am.amname is not distinct from pg_catalog.current_setting('default_table_access_method') as is_default_access_method,
-                   case cls.relreplident when 'f' then 'FULL' when 'n' then 'NOTHING' end as replica_identity,
+                   -- A foreign table's is NOTHING, which is not stated (G-133).
+                   case when cls.relkind = 'f' then null when cls.relreplident = 'f' then 'FULL' when cls.relreplident = 'n' then 'NOTHING' end as replica_identity,
                    -- The firing modes of the table's internal (foreign-key) triggers (G-261).
-                   (select pg_catalog.array_agg(internal_trg.tgenabled::text) from pg_catalog.pg_trigger internal_trg where internal_trg.tgrelid = cls.oid and internal_trg.tgisinternal and internal_trg.tgparentid = 0) as internal_trigger_states
+                   (select pg_catalog.array_agg(internal_trg.tgenabled::text) from pg_catalog.pg_trigger internal_trg where internal_trg.tgrelid = cls.oid and internal_trg.tgisinternal and internal_trg.tgparentid = 0) as internal_trigger_states,
+                   -- A foreign table's server and options (G-133).
+                   fsrv.srvname as foreign_server,
+                   array(select o.option_name from pg_catalog.pg_options_to_table(ft.ftoptions) o) as foreign_option_names,
+                   array(select o.option_value from pg_catalog.pg_options_to_table(ft.ftoptions) o) as foreign_option_values
             from pg_catalog.pg_class cls
+            left join pg_catalog.pg_foreign_table ft on ft.ftrelid = cls.oid
+            left join pg_catalog.pg_foreign_server fsrv on fsrv.oid = ft.ftserver
             left join pg_catalog.pg_am am on am.oid = cls.relam
             inner join pg_catalog.pg_namespace ns on ns.oid = cls.relnamespace
             left join pg_catalog.pg_tablespace spc on spc.oid = cls.reltablespace
@@ -1383,7 +1403,7 @@ public sealed partial class LiveDatabaseModelLoader
             left join pg_catalog.pg_namespace parent_ns on parent_ns.oid = parent_cls.relnamespace
             left join pg_catalog.pg_type of_typ on of_typ.oid = cls.reloftype and cls.reloftype <> 0
             left join pg_catalog.pg_namespace of_ns on of_ns.oid = of_typ.typnamespace
-            where cls.relkind in ('r', 'p')
+            where cls.relkind in ('r', 'p', 'f')
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_class'::regclass and ext_dep.objid = cls.oid and ext_dep.deptype = 'e')
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
@@ -1461,7 +1481,10 @@ public sealed partial class LiveDatabaseModelLoader
                         (select pg_catalog.array_agg(parent_att.attname order by parent_att.attnum)
                          from pg_catalog.pg_inherits parent_inh
                          inner join pg_catalog.pg_attribute parent_att on parent_att.attrelid = parent_inh.inhparent and parent_att.attnum > 0 and not parent_att.attisdropped
-                         where parent_inh.inhrelid = att.attrelid)) as partition_order_differs
+                         where parent_inh.inhrelid = att.attrelid)) as partition_order_differs,
+                   -- A foreign table column's options (G-133).
+                   array(select o.option_name from pg_catalog.pg_options_to_table(att.attfdwoptions) o) as foreign_option_names,
+                   array(select o.option_value from pg_catalog.pg_options_to_table(att.attfdwoptions) o) as foreign_option_values
             from pg_catalog.pg_attribute att
             inner join pg_catalog.pg_class cls on cls.oid = att.attrelid
             inner join pg_catalog.pg_namespace ns on ns.oid = cls.relnamespace
@@ -1479,7 +1502,7 @@ public sealed partial class LiveDatabaseModelLoader
             where att.attnum > 0
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_class'::regclass and ext_dep.objid = cls.oid and ext_dep.deptype = 'e')
               and not att.attisdropped
-              and cls.relkind in ('r', 'p')
+              and cls.relkind in ('r', 'p', 'f')
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
               and (@schemas is null or ns.nspname = any(@schemas))
@@ -1530,6 +1553,8 @@ public sealed partial class LiveDatabaseModelLoader
                     IsDefaultAccessMethod = !reader.IsDBNull(16) && reader.GetBoolean(16),
                     ReplicaIdentity = reader.IsDBNull(17) ? null : reader.GetString(17),
                     InternalTriggerStates = reader.IsDBNull(18) ? [] : reader.GetFieldValue<string[]>(18),
+                    ForeignServer = reader.IsDBNull(19) ? null : reader.GetString(19),
+                    ForeignOptions = Options(reader, 20),
                 };
             }
         }
@@ -1581,6 +1606,7 @@ public sealed partial class LiveDatabaseModelLoader
                     PartitionNotNullDiffers = reader.GetBoolean(24),
                     PartitionAddsNotNull = reader.GetBoolean(25),
                     PartitionOrderDiffers = reader.GetBoolean(26),
+                    ForeignOptions = Options(reader, 27),
                 });
             }
         }
@@ -1619,7 +1645,7 @@ public sealed partial class LiveDatabaseModelLoader
             inner join pg_catalog.pg_class cls on cls.oid = con.conrelid
             left join pg_catalog.pg_class con_idx on con_idx.oid = con.conindid
             inner join pg_catalog.pg_namespace ns on ns.oid = cls.relnamespace
-            where cls.relkind in ('r', 'p')
+            where cls.relkind in ('r', 'p', 'f')
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_class'::regclass and ext_dep.objid = cls.oid and ext_dep.deptype = 'e')
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
@@ -1710,7 +1736,7 @@ public sealed partial class LiveDatabaseModelLoader
             inner join pg_catalog.pg_namespace ns on ns.oid = tbl.relnamespace
             -- A foreign key records the index it references in conindid too; only a key or exclusion constraint owns its index (G-273).
             left join pg_catalog.pg_constraint con on con.conindid = ind.indexrelid and con.contype in ('p', 'u', 'x')
-            where tbl.relkind in ('r', 'p', 'm')
+            where tbl.relkind in ('r', 'p', 'm', 'f')
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_class'::regclass and ext_dep.objid = tbl.oid and ext_dep.deptype = 'e')
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
@@ -3232,6 +3258,12 @@ internal sealed record LiveTableSnapshot(
     /// <summary>True when <see cref="AccessMethod"/> is the server's <c>default_table_access_method</c>, which a scaffold then leaves unwritten (G-223).</summary>
     public bool IsDefaultAccessMethod { get; init; }
 
+    /// <summary>A foreign table's server (G-133); null for any other table.</summary>
+    public string? ForeignServer { get; init; }
+
+    /// <summary>A foreign table's options, in the order PostgreSQL keeps them (G-133).</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> ForeignOptions { get; init; } = [];
+
     /// <summary>The table's replica identity when it is <c>FULL</c> or <c>NOTHING</c> (G-255); <c>USING INDEX</c> is the index's statement, and the default needs none.</summary>
     public string? ReplicaIdentity { get; init; }
 
@@ -3285,6 +3317,9 @@ internal sealed record LiveColumnSnapshot(
 {
     /// <summary>An identity column's options, as <see cref="LiveSequenceSnapshot.IdentityOptionsText"/> writes them (G-214).</summary>
     internal string? IdentityOptions { get; init; }
+
+    /// <summary>A foreign table column's options, in the order PostgreSQL keeps them (G-133).</summary>
+    internal IReadOnlyList<KeyValuePair<string, string>> ForeignOptions { get; init; } = [];
 
     /// <summary>The column's storage (<c>plain</c>, <c>external</c>, <c>main</c>, <c>extended</c>) (G-222).</summary>
     internal string? Storage { get; init; }

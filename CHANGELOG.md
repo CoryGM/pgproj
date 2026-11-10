@@ -86,6 +86,13 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   compared, read back, or shown. A mapping's secret is sent when the mapping is created; the new `publish --apply-secrets [names]` sends the current values
   to mappings that exist. `init` writes each password as a variable and names the variables to set. A wrapper of the project's own needs
   `--allow-superuser-statements`; dropping a server or a mapping needs `--allow-destructive` ([Foreign data](docs/notes/foreign-data.md)).
+- **Foreign tables are modeled:** `CREATE FOREIGN TABLE`, with its server and options, its columns' options, and its `CHECK` constraints, triggers,
+  statistics, grants, owner, and comments, is deployed, read back, compared, and written by `init` to `Schema/<schema>/ForeignTable/`, where before
+  `build` warned about it and left it out. A foreign table can be a partition. The forms `pg_dump` writes after it (`ALTER FOREIGN TABLE ... ALTER COLUMN
+  ... OPTIONS`, `... OWNER TO`, `COMMENT ON FOREIGN TABLE`) are read too. Options change in place; a move to another server drops and creates the table,
+  and is refused while a view or anything else uses it; dropping one needs `--allow-destructive`, dropping its column does not (its rows are the
+  server's). `build` reports an index, or a constraint other than `CHECK` and `NOT NULL`, on a foreign table as an error, since PostgreSQL refuses
+  them. `IMPORT FOREIGN SCHEMA` is still a warning and ignored ([Foreign tables](docs/notes/foreign-data.md#foreign-tables)).
 
 ### Library
 

@@ -95,6 +95,16 @@ public sealed record class CreateOperation : SqlOperation
             ? string.Empty
             : $"\nPARTITION BY {table.PartitionStrategy} ({string.Join(", ", table.PartitionKeyElements.Select(static element => element.ToSql(QuoteDottedName)))})";
 
+        // A foreign table (G-133) takes none of PARTITION BY, USING, WITH, or TABLESPACE, and its SERVER and OPTIONS go where they would.
+        if (table.ForeignServer is { } foreignServer)
+        {
+            unlogged = "FOREIGN ";
+            partitionByClause = string.Empty;
+            withClause = string.Empty;
+            tablespaceClause = string.Empty;
+            usingClause = $"\nSERVER {QuoteIdentifier(foreignServer)}" + (table.ForeignOptions.Count == 0 ? string.Empty : $" OPTIONS ({string.Join(", ", table.ForeignOptions.Select(static option => $"{PgProj.Parser.SqlIdentifiers.QuotePlain(option.Name)} {option.ValueSql}"))})");
+        }
+
         string sql;
         if (table.PartitionKeepsOwnColumns && !string.IsNullOrWhiteSpace(table.PartitionOfTableName))
         {
@@ -195,7 +205,7 @@ public sealed record class CreateOperation : SqlOperation
             trailingStatements.Add(CommentSqlHelper.GenerateReplicaIdentity(table.SchemaName, table.Name, table.ReplicaIdentity));
         }
 
-        var tableComment = CommentSqlHelper.GenerateTableComment(table.SchemaName, table.Name, table.Comment);
+        var tableComment = CommentSqlHelper.GenerateTableComment(table.SchemaName, table.Name, table.Comment, table.IsForeign);
         if (tableComment is not null)
         {
             trailingStatements.Add(tableComment);
@@ -386,6 +396,12 @@ public sealed record class CreateOperation : SqlOperation
         if (column.Compression is not null)
         {
             builder.Append(" COMPRESSION ").Append(column.Compression);
+        }
+
+        // A foreign table's column's options, after the type, where the grammar puts them (G-133).
+        if (column.ForeignOptions.Count > 0)
+        {
+            builder.Append(" OPTIONS (").Append(string.Join(", ", column.ForeignOptions.Select(static option => $"{PgProj.Parser.SqlIdentifiers.QuotePlain(option.Name)} {option.ValueSql}"))).Append(')');
         }
 
         if (!string.IsNullOrWhiteSpace(column.CollationName))

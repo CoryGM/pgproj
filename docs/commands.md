@@ -99,7 +99,6 @@ Not read by pgproj, so absent from the scaffolded project even if the database h
   - roles and their settings (role memberships are scaffolded)
   - text search parsers and templates (a text search configuration and a dictionary are scaffolded)
   - tablespaces (a table's TABLESPACE clause is scaffolded)
-  - foreign tables (foreign data wrappers, servers, and user mappings are scaffolded)
   - subscriptions
   - operator classes and families
   - conversions
@@ -117,7 +116,7 @@ Run 'pgproj build' to validate the scaffolded project.
 
 The list of kinds pgproj does not read is also in `pgproj init --help`; `--quiet` leaves it out of the output. Everything else a database
 can hold is scaffolded, including event triggers, casts, operators, aggregates, collations, text search dictionaries and
-configurations, publications, rules, and extended statistics. See [What is supported](notes/supported-objects.md). A base type is written with its shell and its support functions in its own file ([base types](notes/base-types.md)); a shell left without a definition is left out, and `init` names it. An index PostgreSQL marks `INVALID` (left by a failed `CREATE INDEX CONCURRENTLY`) is left out, as `pg_dump` leaves it out, and `init` names it.
+configurations, publications, rules, extended statistics, foreign data wrappers, servers and user mappings, and foreign tables (in `Schema/<schema>/ForeignTable/`). See [What is supported](notes/supported-objects.md). A base type is written with its shell and its support functions in its own file ([base types](notes/base-types.md)); a shell left without a definition is left out, and `init` names it. An index PostgreSQL marks `INVALID` (left by a failed `CREATE INDEX CONCURRENTLY`) is left out, as `pg_dump` leaves it out, and `init` names it.
 
 #### The report
 
@@ -131,7 +130,7 @@ Markdown, not SQL, so `build` ignores it. It starts with a contents list and has
 - **Modeled objects** - a table per schema, by type then name, with the file each object is in. Indexes, constraints, triggers,
   policies, rules, and extended statistics are listed too; grants, owners, and comments are not (they are in their object's file).
 - **Not modeled: not supported** - the kinds pgproj cannot read, and the objects of those kinds it found: in the scaffolded schemas (a
-  foreign table, a text search parser or template, an operator class or family, a conversion, a shell type) and in the database (a language, a transform,
+  text search parser or template, an operator class or family, a conversion, a shell type) and in the database (a language, a transform,
   an access method).
 - **Not modeled: excluded** - the schemas left out and the files that refer to them, and how many grants, memberships, or owners each
   `--exclude-*` option left out. References are found by looking for `schema.` in the SQL, and PostgreSQL writes names in `public`
@@ -291,7 +290,7 @@ Options:
   the mode on.
 - `--dry-run` - print the script without running it, even with `--execute`.
 - `--output <file>` - write the script to a file.
-- `--allow-destructive` - let `--execute` run a script that can discard data or access (a dropped table, column, materialized view,
+- `--allow-destructive` - let `--execute` run a script that can discard data or access (a dropped table (a foreign table too), column, materialized view,
   extension, or composite type field; a changed column type that can lose a value, so not a widening such as `varchar(50)` to
   `varchar(100)` or `int` to `bigint`; a label removed from an enum type that columns use; a field of a composite type that columns use
   changed to a type that can lose a value; a cast, operator, aggregate, rule, publication, or event trigger that is dropped and not created

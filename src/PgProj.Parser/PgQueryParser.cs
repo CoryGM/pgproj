@@ -499,6 +499,17 @@ public sealed partial class PgQueryParser
                             }
 
                             break;
+                        case "CreateForeignTableStmt":
+                            // A foreign table (G-133): a table with a server and options, read as one, its columns as a table's.
+                            if (TryCreateForeignTableNode(property.Value, statementSql, statementOffset, out var foreignBase) is { } foreignTable)
+                            {
+                                nodes.Add(foreignTable);
+                                var firstForeignChild = nodes.Count;
+                                VisitElement(foreignBase, nodes, foreignTable.Name, foreignTable.SchemaName, currentColumnName: null, statementSql, statementOffset);
+                                MarkCreateTableConstraints(nodes, firstForeignChild, isPartitionOfList: foreignTable.PartitionElementsText is not null);
+                            }
+
+                            continue;
                         case "AlterTableStmt":
                             if (TryGetRelationIdentity(property.Value, "relation", out var alterTableName, out var alterSchemaName))
                             {

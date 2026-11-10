@@ -27,6 +27,7 @@ order of a publish is dependency-safe ([order](order.md)), and what the project 
 | Grants and owners | Grants on schemas, tables, views, sequences, routines, columns, and types and domains ([type privileges](type-privileges.md)), with `REVOKE ... FROM PUBLIC` for PostgreSQL's default on types, domains, routines ([routine privileges](routine-privileges.md)), and the `public` schema ([public schema privileges](public-schema-privileges.md)), `ALL ... IN SCHEMA`, `WITH GRANT OPTION`, [default privileges](default-privileges.md), role memberships ([excluding grants and owners](excluding-grants-and-owners.md)); owners stated with `OWNER TO` ([owners](owners.md)). |
 | Comments | On schemas, tables, columns (of tables, views, materialized views, and composite types), constraints, triggers, policies, views, indexes, sequences, types and domains, extensions, routines, collations, statistics, and text search objects ([storage, partitioning, and comments](storage-partitioning-and-comments.md)). |
 | Other kinds | [Extensions](extensions.md), [event triggers](event-triggers.md), [casts](casts.md), [operators](operators.md), [aggregates](aggregates.md), [rules](rules.md), [publications](publications.md), [collations](collations.md), [extended statistics](extended-statistics.md), [text search dictionaries and configurations](text-search.md), and [foreign data wrappers, servers, and user mappings](foreign-data.md). |
+| Foreign tables | Their server, options, and columns' options, a partition that is one, `CHECK`, triggers, statistics, grants, owner, and comments; a move to another server drops and creates the table ([foreign data](foreign-data.md#foreign-tables)). |
 | Schema-per-tenant databases | A template applied to each tenant's schema ([tenants](tenants.md)). |
 
 ## Not modeled
@@ -36,9 +37,9 @@ These are reported by `build` when a project states them, and not read from a da
 
 - roles and their settings, tablespaces, databases and database-level settings, and subscriptions (cluster-wide: a grant, membership, or owner naming a
   role and a table's `TABLESPACE` are modeled, and `publish` checks they exist; [roles](roles.md), [tablespaces](tablespaces.md));
-- foreign tables ([foreign data](foreign-data.md): wrappers, servers, and user mappings are modeled);
 - operator classes and families, access methods, transforms, languages, conversions, text search parsers and templates, and security labels;
-- a shell type the project never defines ([base types](base-types.md));- comments on event triggers, rules, operators, aggregates, casts, publications, and a domain's constraints;
+- a shell type the project never defines ([base types](base-types.md));
+- comments on event triggers, rules, operators, aggregates, casts, publications, and a domain's constraints;
 - the `ALTER` forms the [statements page](unmodeled-statements.md) lists: a project states each object's final form in its `CREATE`.
 
 An index PostgreSQL marks `INVALID` is reported by `diff` and rebuilt by `publish`, but `init` leaves it out, as `pg_dump` does.

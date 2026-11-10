@@ -213,6 +213,30 @@ public sealed partial class ScriptGenerator
             orderedNodeIds = graph.TopologicalSort().Select(node => node.NodeId).ToArray();
         }
 
+        // A foreign table dropped to move it to another server takes its triggers, statistics, and CHECKs with it: dropped first and created again after it (G-133);
+        // its columns are its own statement, and its grants and a stated owner are put back as for any object created again. What else uses it was refused above.
+        foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is TableDefinition && IsDropAndRecreateObject(change)))
+        {
+            var table = (TableDefinition)rebuilt.NewNode;
+            foreach (var node in graph.GetDependents(rebuilt.NodeId).Where(node => graph.IsTargetNode(node.NodeId)
+                && node.SemanticNode is ConstraintDefinition or TriggerDefinition or StatisticsDefinition
+                && IsCarriedWithForeignTable(node.SemanticNode, table)))
+            {
+                supportReasons[node.NodeId] = $"its foreign table {rebuilt.NodeId} is dropped and created again to move it to another server";
+                if (!addedByNodeId.ContainsKey(node.NodeId) && !modifiedByNodeId.ContainsKey(node.NodeId))
+                {
+                    modifiedByNodeId[node.NodeId] = new ModifiedChange
+                    {
+                        NodeId = node.NodeId,
+                        NodeKind = ChangeRecord.MapKind(node.SemanticNode),
+                        OldNode = node.SemanticNode,
+                        NewNode = node.SemanticNode,
+                        Details = [],
+                    };
+                }
+            }
+        }
+
         // A server dropped to be created again takes its user mappings with it: they are dropped first and created again after it (G-132).
         foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is ForeignServerDefinition && IsDropAndRecreateObject(change)))
         {
@@ -1061,6 +1085,8 @@ public sealed partial class ScriptGenerator
 
             // A publication is altered in place (ALTER PUBLICATION SET), except that FOR ALL TABLES cannot be altered into or out of, so that change is a drop and a create (G-134).
             ChangeNodeKind.Publication => modified.Details.Any(static detail => detail.PropertyName == nameof(PublicationDefinition.IsAllTables)),
+            // A foreign table cannot move to another server in place, nor become or stop being one: a drop and a create (G-133, the user's choice of 2026-11-10).
+            ChangeNodeKind.Table => modified.Details.Any(static detail => detail.PropertyName == nameof(TableDefinition.ForeignServer)),
             // A server's wrapper and TYPE cannot be altered, so changing either is a drop and a create, its user mappings with it; the rest is altered in place (G-132).
             ChangeNodeKind.ForeignServer => modified.Details.Any(static detail => detail.PropertyName is nameof(ForeignServerDefinition.Wrapper) or nameof(ForeignServerDefinition.ServerType)),
             // An extension is altered in place, never dropped and created again, which would drop every object it installed (G-46, G-213).
