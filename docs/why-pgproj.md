@@ -124,6 +124,12 @@ Moving an existing database over is one command: `pgproj init --source-connectio
 schema. If migrations created that database, their history table (`__EFMigrationsHistory`, `flyway_schema_history`) is scaffolded with the rest. Once you
 stop running migrations, delete its file and run `publish` with `--allow-destructive` to drop the table, or keep the file and the table as they are.
 
+## Not Azure Data Studio's `.pgproj` projects
+
+pgproj is not related to the PostgreSQL database projects of Microsoft's PostgreSQL extension for Azure Data Studio, which also used the `.pgproj`
+file extension. That preview feature (the `Microsoft.DataTools.PostgreSql.Sdk` package, version 0.1.0, 2020) combined a project's `.sql` files into one
+script and ran it against a database; it did not compare the project with the database. Azure Data Studio was retired on February 28, 2026.
+
 ## Sources
 
 - EF Core: [Migrations overview](https://learn.microsoft.com/ef/core/managing-schemas/migrations/), [Managing migrations](https://learn.microsoft.com/ef/core/managing-schemas/migrations/managing),
@@ -134,6 +140,9 @@ stop running migrations, delete its file and run `publish` with `--allow-destruc
   [Community Edition](https://atlasgo.io/community-edition), [Pricing](https://atlasgo.io/pricing), [Declarative renames](https://atlasgo.io/changelog/declarative-schema-renames)
 - pgCodeKeeper: [User guide](https://pgcodekeeper.readthedocs.io/), [CLI](https://pgcodekeeper.readthedocs.io/en/latest/cli_version.html),
   [the repository](https://github.com/pgcodekeeper/pgcodekeeper)
+- Azure Data Studio's PostgreSQL extension: [the repository](https://github.com/microsoft/azuredatastudio-postgresql),
+  [the SDK package](https://www.nuget.org/packages/Microsoft.DataTools.PostgreSql.Sdk),
+  [What's happening to Azure Data Studio](https://learn.microsoft.com/azure-data-studio/whats-happening-azure-data-studio)
 
 ---
 
