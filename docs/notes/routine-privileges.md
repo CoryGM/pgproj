@@ -23,7 +23,7 @@ This matters most for a `SECURITY DEFINER` routine, which runs with its owner's 
 - **A routine the project creates** is created, then its `REVOKE` and grants are applied after it.
 - **Taking `PUBLIC`'s default away from a routine that already exists** is a revoke: callers that relied on it stop working. It needs
   `--allow-destructive`. On a routine the script creates, it takes nothing away and needs nothing.
-- **A routine `publish` drops and creates again** (a changed return type or argument list, say) gets its `REVOKE` and grants back. Before pgproj 0.2.2 it came
+- **A routine `publish` drops and creates again** (a changed return type or argument list, say) gets its `REVOKE` and grants back. Before pgproj 0.3.0 it came
   back with `PUBLIC`'s `EXECUTE`, and `diff` reported no change. A routine changed with `CREATE OR REPLACE` keeps its privileges, as PostgreSQL keeps them.
 - **Giving the default back**, when the database's routine has it revoked and the project does not, is `GRANT ... TO PUBLIC`. It takes nothing away, so it
   needs no consent, but it opens the routine to every role, so `publish` says so before anything runs, in words, with the statement that keeps it revoked:
@@ -44,7 +44,7 @@ This matters most for a `SECURITY DEFINER` routine, which runs with its owner's 
 
   `--dry-run` shows the same warning.
 
-**A project written before pgproj 0.2.2 cannot have said so.** If its database has routines with `PUBLIC`'s `EXECUTE` revoked, `diff` now reports each one,
+**A project written before pgproj 0.3.0 cannot have said so.** If its database has routines with `PUBLIC`'s `EXECUTE` revoked, `diff` now reports each one,
 and `publish` would give it back, after the warning. Add the `REVOKE` statements to the project first (the warning lists them, and `init` writes them), or
 set `excludeGrants`.
 

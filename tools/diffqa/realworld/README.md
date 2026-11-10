@@ -1,7 +1,7 @@
 # Real-world QA sweep
 
 This runs pgproj over the schemas of real projects instead of PostgreSQL's regression SQL (see [`../README.md`](../README.md) for that harness). It was first run on
-2026-10-13 and again on 2026-10-15 and before the 0.2.2 release. The sweep finds defects that small, hand-written test schemas do not: a statement nested too deeply, a rule on an
+2026-10-13 and again on 2026-10-15 and before the 0.3.0 release. The sweep finds defects that small, hand-written test schemas do not: a statement nested too deeply, a rule on an
 extension's view, a pgvector operator class, a schema too big for the server's lock table.
 
 ## The schemas

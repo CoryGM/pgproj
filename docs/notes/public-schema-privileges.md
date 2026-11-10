@@ -35,7 +35,7 @@ A project that says nothing about `public` wants PostgreSQL's default, `USAGE` f
   If any of this is not what you want, do not run this publish.
   ```
 
-**A project written before pgproj 0.2.2 cannot have said so.** If its database has `PUBLIC`'s `USAGE` on `public` revoked, `diff` now reports it, and
+**A project written before pgproj 0.3.0 cannot have said so.** If its database has `PUBLIC`'s `USAGE` on `public` revoked, `diff` now reports it, and
 `publish` would give it back, after the warning. Add the `REVOKE` to the project first (`init` writes it), or set `excludeGrants`.
 
 ## `CREATE`: compared only when the project revokes it
