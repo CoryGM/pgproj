@@ -103,8 +103,8 @@ public sealed partial class PgProjEngine
         if (project.PreDeployScriptFiles.Concat(project.PostDeployScriptFiles).FirstOrDefault(file => IsDocument(file.FilePath)) is { } script)
         {
             var file = script with { Text = request.Text ?? script.Text };
-            var tree = Parse(file.FilePath, defaultSchema, file.Text);
-            return Checked(DocumentCheckKind.DeployScript, file.FilePath, [.. DeployScriptCheck.SyntaxErrors(file, tree), .. DeployScriptCheck.ProjectVariables(file) is { } problem ? [problem] : Array.Empty<SemanticDiagnostic>()]);
+            var tree = Parse(file.FilePath, defaultSchema, ScriptVariables.StandIn(file.Text)); // the environment's variables (G-336) as stand-ins of their length
+            return Checked(DocumentCheckKind.DeployScript, file.FilePath, [.. DeployScriptCheck.SyntaxErrors(file, tree), .. DeployScriptCheck.ProjectVariables(file) is { } problem ? [problem] : Array.Empty<SemanticDiagnostic>(), .. DeployScriptCheck.TransactionControl(file, file.Text)]);
         }
 
         if (project.Tenants is { } scriptTenants

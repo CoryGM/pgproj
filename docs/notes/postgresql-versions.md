@@ -18,7 +18,7 @@ naming it. `--dry-run` and `--output` only warn, since the script may be meant f
 One change is not caught up front: changing the access method of a table or materialized view that already exists (`ALTER ... SET ACCESS METHOD`)
 needs PostgreSQL 15, and on 14 the server refuses it and the publish rolls back.
 
-On PostgreSQL 14, an ICU collation's locale, the `public` schema's default grants, and a generated column's dependencies are read as 14 records them.
+On PostgreSQL 14, an ICU collation's locale, the `public` schema's default grants (`PUBLIC`'s `CREATE`, compared only when a project revokes it: [public schema privileges](public-schema-privileges.md)), and a generated column's dependencies are read as 14 records them.
 
 ## PostgreSQL 18 features
 

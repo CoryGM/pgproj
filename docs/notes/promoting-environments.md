@@ -29,8 +29,8 @@ Three databases on one server (`shop_dev`, `shop_qa`, `shop_prod`), `shop_dev` w
 
 ```
 $ pgproj publish --source-connection "$C;Database=shop_dev" --target-connection "$C;Database=shop_qa" --dry-run --exclude-owners
-No diagnostics.
 Source shop_dev (localhost:5432) -> Target shop_qa (localhost:5432)
+No diagnostics.
 CREATE TABLE "public"."customer" ( ...
 ```
 
@@ -129,7 +129,7 @@ The bare `--source-connection` is what turns the mode on; its value comes from t
 
 ## Limits
 
-- The source is read as [`init`](../commands.md#init) reads a database, so what `init` cannot read is not promoted: roles, tablespaces, foreign tables, subscriptions, and
+- The source is read as [`init`](../commands.md#init) reads a database, so what `init` cannot read is not promoted: roles, tablespaces, subscriptions, and
   the other kinds `init` lists.
 - Source and target may be different PostgreSQL versions; what the target is too old for is refused by name before `publish --execute` runs.
 - The whole source is read before the target is opened.

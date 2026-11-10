@@ -99,22 +99,58 @@ public sealed record class OperationBatch
         // check only guards a grant/role membership that disappears with nothing replacing it).
         var recreatedNodeIds = Operations
             .OfType<CreateOperation>()
-            .Where(static create => create.NodeKind is ChangeNodeKind.Grant or ChangeNodeKind.EventTrigger or ChangeNodeKind.Cast or ChangeNodeKind.Operator or ChangeNodeKind.Rule or ChangeNodeKind.Aggregate or ChangeNodeKind.Publication)
+            .Where(static create => create.NodeKind is ChangeNodeKind.Grant or ChangeNodeKind.EventTrigger or ChangeNodeKind.Cast or ChangeNodeKind.Operator or ChangeNodeKind.Rule or ChangeNodeKind.Aggregate or ChangeNodeKind.Publication or ChangeNodeKind.ForeignServer or ChangeNodeKind.UserMapping || create.Node is TableDefinition { IsForeign: true })
             .Select(static create => create.NodeId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // The types and routines this script creates that the database did not have, as a revoked default names them: neither dropped first, nor renamed out of
+        // the way (G-191, G-119), nor replaced in place (G-337, G-338).
+        var replacedIds = Operations
+            .Where(static operation => operation is DropOperation { NodeKind: ChangeNodeKind.Type or ChangeNodeKind.Function or ChangeNodeKind.Procedure } or EnumSwapRenameOperation)
+            .Select(static operation => operation.NodeId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var newObjectKeys = Operations
+            .OfType<CreateOperation>()
+            .Where(create => !create.IsReplacedInPlace && !replacedIds.Contains(create.NodeId))
+            .Select(static create => create.Node switch
+            {
+                TypeDefinition => $"type:{create.NodeId}",
+                FunctionDefinition function => $"function:{DatabaseModel.CreateKey(function.SchemaName, GrantExpansion.RoutineObjectName(function))}",
+                ProcedureDefinition procedure => $"procedure:{DatabaseModel.CreateKey(procedure.SchemaName, GrantExpansion.RoutineObjectName(procedure))}",
+                _ => null,
+            })
+            .OfType<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         return Operations
-            .Select(operation => ClassifyDestructive(operation, recreatedNodeIds))
+            .Select(operation => ClassifyDestructive(operation, recreatedNodeIds, newObjectKeys))
             .Where(static classified => classified is not null)
             .Select(static classified => classified!)
             .ToArray();
     }
 
-    private static DestructiveOperation? ClassifyDestructive(SqlOperation operation, IReadOnlySet<string> recreatedNodeIds)
+    private static DestructiveOperation? ClassifyDestructive(SqlOperation operation, IReadOnlySet<string> recreatedNodeIds, IReadOnlySet<string> newObjectKeys)
         => operation switch
         {
+            // A foreign table keeps no rows here, but dropping one stops every query that reads it (G-133, the user's choice of 2026-11-10); one dropped to move it
+            // to another server, and created again, is not.
+            DropOperation { Node: TableDefinition { IsForeign: true } } drop when recreatedNodeIds.Contains(drop.NodeId)
+                => null,
+            DropOperation { Node: TableDefinition { IsForeign: true } table } drop
+                => new DestructiveOperation { Operation = drop, Reasons = [$"foreign table dropped; every query that reads {table.Name} stops working (its rows are the server {table.ForeignServer}'s)"] },
             DropOperation { Node: TableDefinition } drop
                 => new DestructiveOperation { Operation = drop, Reasons = ["table dropped"] },
+            // An enum type rebuilt under its columns that loses a label (G-191, decision 2): a row holding it cannot be kept; the move then fails and the
+            // publish is rolled back, so nothing is lost silently, but the change is one to consent to. A reorder loses nothing.
+            EnumSwapOperation { RemovedLabels.Count: > 0 } swap
+                => new DestructiveOperation
+                {
+                    Operation = swap,
+                    Reasons = [$"enum label{(swap.RemovedLabels.Count == 1 ? string.Empty : "s")} {string.Join(", ", swap.RemovedLabels.Select(static label => $"'{label}'"))} removed while columns use the type; a row holding one stops the publish"],
+                },
+            // A composite type rebuilt under its columns (G-119, decision 2) that drops a field, or narrows one: a widening keeps every value.
+            CompositeSwapOperation { DestructiveReasons.Count: > 0 } swap
+                => new DestructiveOperation { Operation = swap, Reasons = swap.DestructiveReasons },
             DropOperation { Node: ViewDefinition { IsMaterialized: true } } drop
                 => new DestructiveOperation { Operation = drop, Reasons = ["materialized view dropped; its computed data is lost until it is refreshed"] },
             DropOperation { Node: TypeDefinition type } drop when SqlOperation.IsExtension(type)
@@ -132,6 +168,11 @@ public sealed record class OperationBatch
             // A publication that only disappears stops sending its tables' changes to every subscriber; one whose FOR ALL TABLES changes is dropped and created again (G-134).
             DropOperation { Node: PublicationDefinition publication } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [$"publication dropped; subscribers stop receiving what {publication.Name} sent"] },
+            // A server or user mapping that only disappears stops every foreign table and connection through it (G-132, the user's choice of 2026-11-10).
+            DropOperation { Node: ForeignServerDefinition server } drop when !recreatedNodeIds.Contains(drop.NodeId)
+                => new DestructiveOperation { Operation = drop, Reasons = [$"foreign server dropped; every foreign table and connection through {server.Name} stops working"] },
+            DropOperation { Node: UserMappingDefinition mapping } drop when !recreatedNodeIds.Contains(drop.NodeId)
+                => new DestructiveOperation { Operation = drop, Reasons = [$"user mapping dropped; {mapping.Role} no longer connects through {mapping.Server} with it"] },
             DropOperation { Node: AggregateDefinition aggregate } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [$"aggregate dropped; every query that calls {aggregate.Name} stops working"] },
             DropOperation { Node: RuleDefinition rule } drop when !recreatedNodeIds.Contains(drop.NodeId)
@@ -140,8 +181,16 @@ public sealed record class OperationBatch
                 => new DestructiveOperation { Operation = drop, Reasons = [$"operator dropped; every expression that uses {definition.Name} stops working"] },
             DropOperation { Node: EventTriggerDefinition eventTrigger } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [$"event trigger dropped; it no longer runs on {eventTrigger.EventName ?? "its event"}"] },
+            // Undoing a revoked default gives PUBLIC its privilege back: nothing is taken away (G-337, G-338); publish warns that it widens access instead.
+            DropOperation { Node: GrantDefinition { RevokesDefault: true } }
+                => null,
             DropOperation { Node: GrantDefinition grant } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [DescribeGrantRevocation(grant)] },
+            // Taking PUBLIC's default away from a type or routine that exists is a revoke (G-337, G-338); on one created in this script, or given back to one
+            // recreated, it is not. A rule for new types or functions (ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC) changes nothing that exists. The public
+            // schema always exists (pgproj never creates it), so taking its USAGE or CREATE from PUBLIC is always a revoke (G-341, the user's choice of 2026-11-10).
+            CreateOperation { Node: GrantDefinition { RevokesDefault: true, ObjectName: not null } revoked, IsRestored: false } create when !newObjectKeys.Contains(revoked.ObjectKey ?? string.Empty)
+                => new DestructiveOperation { Operation = create, Reasons = [$"grant revoked: {GrantSqlBuilder.Grant(revoked).TrimEnd(';')}"] },
             // A changed owner takes the old owner's privileges away and puts them on the new one, which is an access-loss event for whoever relied on them (G-146);
             // an owner set on a new object (a create) is not.
             AlterOperation { Change.OldNode: OwnerDefinition oldOwner, Change.NewNode: OwnerDefinition newOwner } alter
@@ -151,7 +200,8 @@ public sealed record class OperationBatch
                     Reasons = [$"owner of {newOwner.ObjectKind} {newOwner.ObjectKey} changes from {oldOwner.OwnerRole} to {newOwner.OwnerRole}; {oldOwner.OwnerRole} loses the privileges it had as the owner"],
                 },
             AlterOperation { Change.OldNode: TableDefinition oldTable, Change.NewNode: TableDefinition newTable } alter
-                => AlterOperation.GetDestructiveColumnReasons(oldTable, newTable) is { Count: > 0 } reasons
+                // A foreign table's column holds no rows here: dropping or retyping one loses nothing (G-133).
+                => !newTable.IsForeign && AlterOperation.GetDestructiveColumnReasons(oldTable, newTable) is { Count: > 0 } reasons
                     ? new DestructiveOperation { Operation = alter, Reasons = reasons }
                     : null,
             AlterOperation { Change.OldNode: TypeDefinition oldType, Change.NewNode: TypeDefinition newType } alter

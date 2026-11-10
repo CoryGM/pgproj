@@ -29,6 +29,9 @@ public enum ChangeNodeKind
     TextSearchDictionary,
     TextSearchConfiguration,
     SchemaComment,
+    ForeignDataWrapper,
+    ForeignServer,
+    UserMapping,
 }
 
 public abstract record class ChangeRecord
@@ -60,6 +63,9 @@ public abstract record class ChangeRecord
             RuleDefinition => ChangeNodeKind.Rule,
             AggregateDefinition => ChangeNodeKind.Aggregate,
             PublicationDefinition => ChangeNodeKind.Publication,
+            ForeignDataWrapperDefinition => ChangeNodeKind.ForeignDataWrapper,
+            ForeignServerDefinition => ChangeNodeKind.ForeignServer,
+            UserMappingDefinition => ChangeNodeKind.UserMapping,
             OwnerDefinition => ChangeNodeKind.Owner,
             SchemaDefinition => ChangeNodeKind.SchemaComment,
             CollationDefinition => ChangeNodeKind.Collation,

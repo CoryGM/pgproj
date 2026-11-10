@@ -42,7 +42,7 @@ public sealed class CompositeTypeInPlaceEndToEndTests
     }
 
     [TestMethod]
-    public async Task AFieldIsRetypedInPlaceWhenNoColumnUsesTheTypeAndRefusedWithoutDamageWhenOneDoes()
+    public async Task AFieldIsRetypedInPlaceWhenNoColumnUsesTheTypeAndRefusedByNameWhenAColumnAndARoutineDo()
     {
         await WithProjectAsync(async (write, run, scalar) =>
         {
@@ -61,7 +61,12 @@ public sealed class CompositeTypeInPlaceEndToEndTests
             await write("CREATE SCHEMA s; CREATE TYPE s.addr AS (street text, zip varchar(30)); " + function + " " + Table);
             var refused = await run(["publish", "--execute"]);
             Assert.AreNotEqual(0, refused.ExitCode, refused.Output);
-            StringAssert.Contains(refused.Output, "cannot alter type \"addr\" because column \"t.a\" uses it");
+            // Before G-119 the server refused this (`cannot alter type "addr" because column "t.a" uses it`). Now a column alone would have the type rebuilt
+            // under it (CompositeFieldRetypeEndToEndTests); a routine that takes the type keeps it refused, before anything runs, naming the routine.
+            StringAssert.Contains(refused.Output, "[Type] s.addr");
+            var script = (await run(["publish", "--dry-run"])).Output;
+            StringAssert.Contains(script, "The composite type s.addr retypes a field while columns use it");
+            StringAssert.Contains(script, "s.street");
             Assert.AreEqual("character varying(20)", await scalar("SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = 's.addr'::regclass AND attname = 'zip';"));
         });
     }

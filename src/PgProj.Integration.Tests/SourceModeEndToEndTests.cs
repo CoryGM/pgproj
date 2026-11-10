@@ -50,6 +50,11 @@ public sealed class SourceModeEndToEndTests
             StringAssert.Contains(preview.Output, "Source " + sourceName);
             StringAssert.Contains(preview.Output, "-> Target " + targetName);
             StringAssert.Contains(preview.Output, "CREATE TABLE");
+
+            // The direction is the first line, before the source's diagnostics (G-349), for publish and for diff.
+            StringAssert.StartsWith(preview.Output.TrimStart(), "Source " + sourceName, preview.Output);
+            var compared = await RunAsync("diff", "--project", project, "--source-connection", source, "--target-connection", target);
+            StringAssert.StartsWith(compared.Output.TrimStart(), "Source " + sourceName, compared.Output);
             Assert.AreEqual(string.Empty, await ScalarTextAsync(target, "SELECT coalesce(to_regclass('public.customer')::text, '')"), "a dry run changes nothing");
 
             var published = await RunAsync("publish", "--project", project, "--source-connection", source, "--target-connection", target, "--execute");

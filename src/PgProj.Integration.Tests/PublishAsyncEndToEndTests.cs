@@ -35,9 +35,11 @@ public sealed class PublishAsyncEndToEndTests
             Assert.IsNull(part.Label);
             StringAssert.Contains(part.Script, "CREATE TABLE");
             Assert.AreEqual(part.Script, plan.Script, "no lock timeout, so the script as written is the part's");
-            CollectionAssert.AreEqual(new[] { PublishNoticeKind.NotTransactional }, plan.Warnings.Select(static warning => warning.Kind).ToArray());
-            StringAssert.StartsWith(plan.Warnings.Single().Text, "Warning: the script is not wrapped in a transaction;");
-            Assert.IsTrue(plan.Warnings.Single().ForKeptScript, "a shell that runs the script and keeps none leaves it out");
+            // G-165: the script carries its transaction, so a plain script is not warned about (it was, as NotTransactional, before).
+            Assert.IsEmpty(plan.Warnings, string.Join(Environment.NewLine, plan.Warnings.Select(static warning => warning.Text)));
+            StringAssert.StartsWith(plan.Script, "BEGIN;");
+            StringAssert.EndsWith(plan.Script.TrimEnd(), "COMMIT;");
+            Assert.DoesNotContain("BEGIN;", part.TransactionalScript, "what --execute runs in its own transaction has none");
             Assert.IsEmpty(plan.Refusals);
             Assert.IsGreaterThan(0, plan.Compare.AddedCount, "the project differs from the empty database");
             Assert.AreEqual(string.Empty, await ScalarTextAsync(connection, "select coalesce(to_regclass('s.t')::text, '')"), "a plan runs nothing");
@@ -165,7 +167,7 @@ public sealed class PublishAsyncEndToEndTests
             Assert.AreEqual(PublishStatus.Planned, plan.Status, plan.Message);
             var kinds = plan.Warnings.Select(static warning => warning.Kind).ToArray();
             CollectionAssert.AreEqual(
-                new[] { PublishNoticeKind.LockRewrite, PublishNoticeKind.NotTransactional, PublishNoticeKind.MissingRole },
+                new[] { PublishNoticeKind.LockRewrite, PublishNoticeKind.MissingRole }, // G-165: a plain script is no longer NotTransactional
                 kinds,
                 "in the order publish prints them: " + string.Join(", ", kinds));
             StringAssert.Contains(plan.Warnings[0].Text, "SET NOT NULL");
@@ -173,14 +175,14 @@ public sealed class PublishAsyncEndToEndTests
             Assert.AreEqual(ChangeNodeKind.Table, locked.NodeKind);
             Assert.AreEqual("s.t", locked.NodeId);
             StringAssert.Contains(locked.Detail, "SET NOT NULL");
-            StringAssert.Contains(plan.Warnings[2].Text, "role \"pgproj_g309c_missing_role\"");
-            CollectionAssert.AreEqual(new[] { "pgproj_g309c_missing_role" }, plan.Warnings[2].Items.Select(static item => item.NodeId).ToArray());
+            StringAssert.Contains(plan.Warnings[1].Text, "role \"pgproj_g309c_missing_role\"");
+            CollectionAssert.AreEqual(new[] { "pgproj_g309c_missing_role" }, plan.Warnings[1].Items.Select(static item => item.NodeId).ToArray());
             CollectionAssert.AreEqual(
                 plan.Warnings.Select(static warning => warning.Text).ToArray(),
                 warningEvents.Select(static e => e.Message).ToArray(),
                 "each warning is reported as an event as it is found, in the same order");
             CollectionAssert.AreEqual(
-                new[] { "LockRewrite", "Compared", "ScriptPlanned", "NotTransactional", "MissingRole" },
+                new[] { "LockRewrite", "Compared", "ScriptPlanned", "MissingRole" }, // G-165: no NotTransactional for a plain script
                 events.Where(static e => e.Kind is EngineEventKind.Notice or EngineEventKind.Compared or EngineEventKind.ScriptPlanned)
                     .Select(static e => e.Notice?.Kind.ToString() ?? e.Kind.ToString())
                     .ToArray(),
@@ -248,7 +250,8 @@ public sealed class PublishAsyncEndToEndTests
             Assert.AreEqual(1, plan.Parts.Single().AfterCommit.Count);
             StringAssert.Contains(plan.Script, "CREATE INDEX CONCURRENTLY");
             Assert.AreEqual(PublishNoticeKind.NotTransactional, plan.Warnings.Single().Kind);
-            StringAssert.Contains(plan.Warnings.Single().Text, "Run the part above the line", "the concurrent script has its own warning");
+            StringAssert.Contains(plan.Warnings.Single().Text, "run outside the script's transaction, after its COMMIT", "the concurrent script has its own warning");
+            Assert.IsTrue(plan.Warnings.Single().ForKeptScript, "a shell that runs the script and keeps none leaves it out");
 
             var result = await new PgProjEngine().PublishAsync(
                 Request(directory, connection) with { Mode = PublishMode.Execute, Concurrently = true, Progress = new Collect(events) },

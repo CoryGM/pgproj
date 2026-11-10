@@ -52,7 +52,7 @@ internal static class ProjectModelBuilder
             project.SearchPath,
             excludeOwners ?? project.ExcludeOwners,
             likeSourceTrees);
-        model.Diagnostics = [.. model.Diagnostics, .. DeployScriptCheck.CheckSyntax(project, file => parse(file.FilePath, file.Text)), .. DeployScriptCheck.Check(project, parser)];
+        model.Diagnostics = [.. model.Diagnostics, .. DeployScriptCheck.CheckSyntax(project, file => parse(file.FilePath, ScriptVariables.StandIn(file.Text))), .. DeployScriptCheck.Check(project, parser)];
         if (project.Tenants is { } checkedTenants)
         {
             model.Diagnostics = [.. model.Diagnostics, .. TenantTemplateCheck.Check(syntaxTrees, templateTrees, checkedTenants.Prefix)];

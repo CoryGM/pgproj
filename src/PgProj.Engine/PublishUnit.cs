@@ -12,8 +12,11 @@ namespace PgProj.Engine;
 /// <param name="Label">How messages name the part: null for an ordinary project, <c>shared schemas</c>, or the tenant's schema.</param>
 /// <param name="Batch">Every operation, the checks' input (after <c>--comments-only</c>, when given).</param>
 /// <param name="Transactional">The operations run in the transaction.</param>
-/// <param name="TransactionalScript">The transaction's script, headed by the superuser comment and the <c>SET search_path</c> it needs.</param>
-/// <param name="Script">The whole script as printed or written: the transaction's, then the <c>--concurrently</c> part after its marker line.</param>
+/// <param name="TransactionalScript">The transaction's script, headed by the superuser comment and the <c>SET search_path</c> it needs; what <c>--execute</c> runs in its own transaction.</param>
+/// <param name="Script">
+/// The whole script as printed or written (G-165): the superuser comment, the transaction's statements between <c>BEGIN;</c> and <c>COMMIT;</c>, then the
+/// <c>--concurrently</c> part after its marker line, so a client that runs it as it is (<c>psql -f</c>) applies all of the transaction or none of it.
+/// </param>
 internal sealed record PublishUnit(
     string? Label,
     DatabaseModel ProjectModel,
@@ -28,7 +31,10 @@ internal sealed record PublishUnit(
     string Script)
 {
     /// <summary>True when the part has something to run.</summary>
-    public bool HasStatements => SqlStatementSplitter.Split(Script).Count > 0;
+    public bool HasStatements => StatementCount > 0;
+
+    /// <summary>How many statements the part runs: the transaction's and those after the commit, not the <c>BEGIN</c> and <c>COMMIT</c> of <see cref="Script"/>.</summary>
+    public int StatementCount => SqlStatementSplitter.Split(TransactionalScript).Count + AfterCommit.Count;
 
     /// <summary>
     /// Plans one part from its comparison. <paramref name="searchPath"/> is the path its statements need: null for the project's own (G-93, the script is
@@ -49,12 +55,19 @@ internal sealed record PublishUnit(
         int serverMajorVersion,
         IReadOnlySet<(string Schema, string Name)>? relationNames,
         IReadOnlyCollection<string> untrustedLanguages,
-        IProgress<EngineEvent>? progress)
+        IProgress<EngineEvent>? progress,
+        IReadOnlyList<string>? applySecrets = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
         var dependencyGraph = ScriptComposition.BuildDependencyGraph(liveModel, projectModel);
         var fullBatch = ScriptComposition.Generate(changes, dependencyGraph, deployScripts.Pre, deployScripts.Post);
+        if (applySecrets is not null)
+        {
+            // --apply-secrets (G-132): the secrets of user mappings that exist, sent again; a mapping this script creates is sent its secret anyway.
+            fullBatch = fullBatch with { Operations = [.. fullBatch.Operations, .. ApplySecretsOperation.For(projectModel, liveModel, fullBatch, applySecrets)] };
+        }
+
         var batch = fullBatch;
         if (commentsOnly)
         {
@@ -76,10 +89,17 @@ internal sealed record PublishUnit(
         var body = searchPath is null
             ? ScriptComposition.GenerateSqlScript(transactional, project)
             : WithSearchPath(ScriptComposition.GenerateSqlScript(transactional), searchPath);
-        var transactionalScript = global::PgProj.Engine.SuperuserStatements.ScriptHeader(superuserStatements) + body;
-        var script = afterCommit.Count == 0
+        var header = global::PgProj.Engine.SuperuserStatements.ScriptHeader(superuserStatements);
+        var transactionalScript = header + body;
+
+        // A printed or written script carries its own transaction (G-165, the user's design of 2026-11-09); --execute runs TransactionalScript in one it opens.
+        var script = SqlStatementSplitter.Split(body).Count == 0
             ? transactionalScript
-            : transactionalScript.TrimEnd() + Environment.NewLine + Environment.NewLine + plan!.AfterCommitScript() + Environment.NewLine;
+            : header + "BEGIN;" + Environment.NewLine + Environment.NewLine + body.TrimEnd() + Environment.NewLine + Environment.NewLine + "COMMIT;" + Environment.NewLine;
+        if (afterCommit.Count > 0)
+        {
+            script = script.TrimEnd() + Environment.NewLine + Environment.NewLine + plan!.AfterCommitScript() + Environment.NewLine;
+        }
 
         return new PublishUnit(label, projectModel, liveModel, changes, fullBatch, batch, transactional, afterCommit, superuserStatements, transactionalScript, script);
     }

@@ -11,7 +11,7 @@
 #   tools/engine-parity/parity.sh wide    <new-cli-dir>             build --dump-model over a generated 1,200-column table and other wide statements
 #   tools/engine-parity/parity.sh corpus  <new-cli-dir> [pg18 ...]  build --dump-model over the differential harness's projects
 #                                                                   (tools/diffqa/work/<version>/<case>/{iproj,wproj}; needs a harness run)
-#   PARITY_PG="Host=localhost;Port=55490;Username=postgres;Password=..." tools/engine-parity/parity.sh diff <new-cli-dir>
+#   PARITY_PG="Host=pgproj-parity-pg;Port=5432;Username=postgres;Password=..." tools/engine-parity/parity.sh diff <new-cli-dir>
 #                                                                   diff (and build/diff in source mode) over the samples against a throwaway server (databases parity_a, parity_b, parity_t)
 #   PARITY_PG="..." PARITY_CONTAINER=<name> tools/engine-parity/parity.sh publish <new-cli-dir>
 #                                                                   publish (printed, --dry-run, --output, --execute, --concurrently, --comments-only, refusals, failures, tenants, source mode)
@@ -24,6 +24,15 @@
 # <new-cli-dir> is the output of `dotnet publish src/PgProj.Cli/PgProj.Cli.csproj -c Release -o <dir>` of the commit being checked.
 # Environment: BASELINE (default artifacts/baseline-cli), OUT (default artifacts/engine-parity/<UTC time>), PARITY_COMBINED=1 (compare standard output and
 # standard error as one stream, in the order a terminal shows them).
+#
+# Both CLIs run in a container (PARITY_IMAGE, default mcr.microsoft.com/dotnet/runtime:10.0) with the repository mounted at /repo, so BASELINE, the new CLI,
+# and OUT must be inside the repository. The throwaway server publishes no host port: make a Docker network (PARITY_NETWORK, default pgproj-parity), start
+# the server on it, and name it in PARITY_PG by its container name; the CLI containers join that network whenever PARITY_PG is set:
+#
+#   docker network create pgproj-parity
+#   docker run -d --name pgproj-parity-pg --network pgproj-parity -e POSTGRES_PASSWORD=... postgres:18-alpine
+#   PARITY_PG="Host=pgproj-parity-pg;Port=5432;Username=postgres;Password=..." PARITY_CONTAINER=pgproj-parity-pg tools/engine-parity/parity.sh publish <dir>
+#   docker rm -f pgproj-parity-pg; docker network rm pgproj-parity
 # Exit code: 0 when every case matched, 1 otherwise; a case that differs keeps both outputs under OUT.
 set -u
 export MSYS_NO_PATHCONV=1
@@ -35,13 +44,29 @@ ROOT="$(winpath "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)")"
 BASELINE="$(winpath "${BASELINE:-$ROOT/artifacts/baseline-cli}")"
 OUT="$(winpath "${OUT:-$ROOT/artifacts/engine-parity/$(date -u +%Y%m%d-%H%M%S)}")"
 mode="${1:?mode: samples, wide, corpus, diff, publish, init, or document}"
-NEW="$(winpath "${2:?the directory of the CLI to check}")"
+NEW="$(winpath "$(cd "${2:?the directory of the CLI to check}" && pwd)")"
 shift 2
 mkdir -p "$OUT"
 
 # psql on the throwaway server (publish mode), through its container.
-PARITY_CONTAINER="${PARITY_CONTAINER:-pgproj-parity-55490}"
+PARITY_CONTAINER="${PARITY_CONTAINER:-pgproj-parity-pg}"
 psql_run() { docker exec -i "$PARITY_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -q -At "$@"; }
+
+# The CLIs run in a container on the server's network, with the repository at /repo (see the header): a path inside the repository is given as /repo/...
+PARITY_NETWORK="${PARITY_NETWORK:-pgproj-parity}"
+PARITY_IMAGE="${PARITY_IMAGE:-mcr.microsoft.com/dotnet/runtime:10.0}"
+inrepo() { echo "${1//"$ROOT"//repo}"; }
+for dir in "$BASELINE" "$NEW" "$OUT"; do
+  case "$dir" in "$ROOT"/*) ;; *) echo "$dir is not inside the repository ($ROOT), which is all the CLI container sees" >&2; exit 2 ;; esac
+done
+# cli_run <cli-dir> <arguments>: the CLI in that folder, run in a container, every repository path in the arguments given as the container sees it.
+cli_run() {
+  local cli="$1" a args=() net=()
+  shift
+  for a in "$@"; do args+=("$(inrepo "$a")"); done
+  [ -n "${PARITY_PG:-}" ] && net=(--network "$PARITY_NETWORK")
+  docker run --rm "${net[@]}" -v "$ROOT:/repo" -w /repo "$PARITY_IMAGE" dotnet "$(inrepo "$cli")/pgproj.dll" "${args[@]}"
+}
 
 # pg_recreate <name> <template>: a fresh database from a template (publish mode).
 pg_recreate() {
@@ -74,9 +99,9 @@ run_one() {
   done
   # PARITY_COMBINED=1 writes standard error into standard output, as a terminal shows them, so the order of the two is compared too (G-316).
   if [ -n "${PARITY_COMBINED:-}" ]; then
-    (cd "$ROOT" && dotnet "$cli/pgproj.dll" "${args[@]}" >"$dir/stdout.txt" 2>&1; echo $? >"$dir/exit.txt"; : >"$dir/stderr.txt")
+    (cd "$ROOT" && cli_run "$cli" "${args[@]}" >"$dir/stdout.txt" 2>&1; echo $? >"$dir/exit.txt"; : >"$dir/stderr.txt")
   else
-    (cd "$ROOT" && dotnet "$cli/pgproj.dll" "${args[@]}" >"$dir/stdout.txt" 2>"$dir/stderr.txt"; echo $? >"$dir/exit.txt")
+    (cd "$ROOT" && cli_run "$cli" "${args[@]}" >"$dir/stdout.txt" 2>"$dir/stderr.txt"; echo $? >"$dir/exit.txt")
   fi
   # HASH_DUMPS=1 (wide mode): the dump of the wide project is about 10 GB, so it is replaced by its SHA-256 as soon as it is written, and the two sides'
   # hashes are compared. Only one dump is on disk at a time, and only until it is hashed (G-309e).
@@ -97,7 +122,7 @@ mask_tree() {
     [ "$masked" != "$base" ] && mv "$f" "${f%/*}/$masked"
   done < <(find "$dir/files" -type f -print0)
   while IFS= read -r -d '' f; do
-    sed -i -E -e 's#\\\\#/#g' -e 's#\\#/#g' -e "s#$dir/files#<out>#g" \
+    sed -i -E -e 's#\\\\#/#g' -e 's#\\#/#g' -e "s#$dir/files#<out>#g" -e "s#$(inrepo "$dir/files")#<out>#g" \
       -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z?( UTC)?/<time>/g' \
       -e 's/\| Elapsed \| [0-9.]+ s \|/| Elapsed | <n> s |/' -e 's/(init-report|erd)-[0-9]{4}(-[0-9]{2}){5}/\1-<t>/g' "$f"
   done < <(find "$dir/files" -type f -print0)
@@ -118,7 +143,7 @@ compare() {
     for f in stdout.txt stderr.txt; do
       # The CLI prints Windows paths with backslashes: both sides are written with slashes first, so the folder can be found.
       # --verbose prints how long a step took.
-      sed -i -e 's#\\#/#g' -e "s#$OUT/$label/$side/files#<out>#g" -E -e 's/[0-9]+ ms/<n> ms/g' -e 's/pp_(base|new)_/pp_/g' "$OUT/$label/$side/$f"
+      sed -i -e 's#\\#/#g' -e "s#$OUT/$label/$side/files#<out>#g" -e "s#$(inrepo "$OUT/$label/$side/files")#<out>#g" -E -e 's/[0-9]+ ms/<n> ms/g' -e 's/pp_(base|new)_/pp_/g' "$OUT/$label/$side/$f"
     done
     for f in "$OUT/$label/$side/files"/*.mmd "$OUT/$label/$side/files"/*.md "$OUT/$label/$side/files"/*.html; do
       [ -f "$f" ] && sed -i -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} UTC/<time>/g' "$f"
@@ -247,7 +272,7 @@ case "$mode" in
     done
     ;;
   diff)
-    # diff against a throwaway server: PARITY_PG is a connection string without a database (Host=localhost;Port=5549x;Username=postgres;Password=...),
+    # diff against a throwaway server: PARITY_PG is a connection string without a database (Host=<server container>;Port=5432;Username=postgres;Password=...; see the header),
     # and the databases parity_a, parity_b, and parity_t exist on it. The samples are published with the baseline first.
     : "${PARITY_PG:?PARITY_PG: a connection string to a throwaway server, without a database}"
     ms="$ROOT/samples/MultiSchema/pgproj.json"
@@ -255,8 +280,8 @@ case "$mode" in
     a="$PARITY_PG;Database=parity_a"
     b="$PARITY_PG;Database=parity_b"
     t="$PARITY_PG;Database=parity_t"
-    dotnet "$BASELINE/pgproj.dll" publish --project "$ms" --target-connection "$a" --execute --allow-destructive >/dev/null 2>&1
-    dotnet "$BASELINE/pgproj.dll" publish --project "$pt" --target-connection "$t" --execute --allow-destructive >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$ms" --target-connection "$a" --execute --allow-destructive >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$pt" --target-connection "$t" --execute --allow-destructive >/dev/null 2>&1
     # One change in each: a table in the multi-schema project, and a table in the tenant template.
     changed="$OUT/inputs/ms-changed"
     mkdir -p "$changed"
@@ -309,15 +334,15 @@ case "$mode" in
     ms="$ROOT/samples/MultiSchema/pgproj.json"
     pt="$ROOT/samples/SchemaPerTenant/pgproj.json"
     for d in pp_empty pp_ms pp_pt pp_small; do psql_run -d postgres -c "DROP DATABASE IF EXISTS $d WITH (FORCE)" >/dev/null; psql_run -d postgres -c "CREATE DATABASE $d" >/dev/null; done
-    dotnet "$BASELINE/pgproj.dll" publish --project "$ms" --target-connection "$PARITY_PG;Database=pp_ms" --execute --allow-destructive >/dev/null 2>&1
-    dotnet "$BASELINE/pgproj.dll" publish --project "$pt" --target-connection "$PARITY_PG;Database=pp_pt" --execute --allow-destructive >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$ms" --target-connection "$PARITY_PG;Database=pp_ms" --execute --allow-destructive >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$pt" --target-connection "$PARITY_PG;Database=pp_pt" --execute --allow-destructive >/dev/null 2>&1
 
     # A small project, and variations of it.
     inputs="$OUT/inputs"
     mkproj() { mkdir -p "$inputs/$1/sql"; printf '{"name":"%s","version":"1","source":"./sql"%s}\n' "$1" "${3:-}" >"$inputs/$1/pgproj.json"; printf '%s\n' "$2" >"$inputs/$1/sql/s.sql"; }
     base_sql='CREATE SCHEMA s; CREATE TABLE s.t (id int PRIMARY KEY, v int); CREATE TABLE s.u (id int);'
     mkproj small "$base_sql"
-    dotnet "$BASELINE/pgproj.dll" publish --project "$inputs/small/pgproj.json" --target-connection "$PARITY_PG;Database=pp_small" --execute >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$inputs/small/pgproj.json" --target-connection "$PARITY_PG;Database=pp_small" --execute >/dev/null 2>&1
     psql_run -d pp_small -c "INSERT INTO s.t VALUES (1, 1), (2, 2); INSERT INTO s.u VALUES (1);" >/dev/null
     mkproj sm_index 'CREATE SCHEMA s; CREATE TABLE s.t (id int PRIMARY KEY, v int); CREATE TABLE s.u (id int); CREATE INDEX t_v_idx ON s.t (v); ALTER TABLE s.u ADD CONSTRAINT u_fk FOREIGN KEY (id) REFERENCES s.t (id);'
     mkproj sm_notnull 'CREATE SCHEMA s; CREATE TABLE s.t (id int PRIMARY KEY, v int NOT NULL); CREATE TABLE s.u (id int);'
@@ -432,8 +457,8 @@ case "$mode" in
     ms="$ROOT/samples/MultiSchema/pgproj.json"
     pt="$ROOT/samples/SchemaPerTenant/pgproj.json"
     for d in pp_init_ms pp_init_pt pp_init_empty; do psql_run -d postgres -c "DROP DATABASE IF EXISTS $d WITH (FORCE)" >/dev/null; psql_run -d postgres -c "CREATE DATABASE $d" >/dev/null; done
-    dotnet "$BASELINE/pgproj.dll" publish --project "$ms" --target-connection "$PARITY_PG;Database=pp_init_ms" --execute --allow-destructive >/dev/null 2>&1
-    dotnet "$BASELINE/pgproj.dll" publish --project "$pt" --target-connection "$PARITY_PG;Database=pp_init_pt" --execute --allow-destructive >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$ms" --target-connection "$PARITY_PG;Database=pp_init_ms" --execute --allow-destructive >/dev/null 2>&1
+    cli_run "$BASELINE" publish --project "$pt" --target-connection "$PARITY_PG;Database=pp_init_pt" --execute --allow-destructive >/dev/null 2>&1
     # A base type, an INVALID index, and mixed internal trigger states, for init's warnings.
     psql_run -d pp_init_ms -c "CREATE TABLE sales.pp_mixed (id int PRIMARY KEY, parent int REFERENCES sales.pp_mixed (id)); ALTER TABLE sales.pp_mixed DISABLE TRIGGER ALL; ALTER TABLE sales.pp_mixed ENABLE TRIGGER USER;" >/dev/null 2>&1
     msdb="$PARITY_PG;Database=pp_init_ms"
@@ -502,7 +527,7 @@ case "$mode" in
     if [ -n "${PARITY_PG:-}" ]; then
       psql_run -d postgres -c "DROP DATABASE IF EXISTS pp_doc_ms WITH (FORCE)" >/dev/null
       psql_run -d postgres -c "CREATE DATABASE pp_doc_ms" >/dev/null
-      dotnet "$BASELINE/pgproj.dll" publish --project "$ms" --target-connection "$PARITY_PG;Database=pp_doc_ms" --execute --allow-destructive >/dev/null 2>&1
+      cli_run "$BASELINE" publish --project "$ms" --target-connection "$PARITY_PG;Database=pp_doc_ms" --execute --allow-destructive >/dev/null 2>&1
       db="$PARITY_PG;Database=pp_doc_ms"
       compare "db-document" -- document --source-connection "$db" --output "{OUT}/docs" || failures=$((failures + 1))
       compare "db-document-all" -- document --source-connection "$db" --output "{OUT}/docs" --format html,markdown,json --verbose || failures=$((failures + 1))

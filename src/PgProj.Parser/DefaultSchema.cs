@@ -85,6 +85,7 @@ public static class DefaultSchema
                 AlterTableColumnDefaultNode columnDefault => columnDefault with { SchemaName = Or(columnDefault.SchemaName) },
                 AlterTableAddIdentityNode addIdentity => addIdentity with { SchemaName = Or(addIdentity.SchemaName) },
                 AlterTableColumnStorageNode columnStorage => columnStorage with { SchemaName = Or(columnStorage.SchemaName) },
+                AlterTableColumnOptionsNode columnOptions => columnOptions with { SchemaName = Or(columnOptions.SchemaName) },
                 AlterTableAttachPartitionNode attach => attach with
                 {
                     SchemaName = Or(attach.SchemaName),
@@ -120,7 +121,7 @@ public static class DefaultSchema
         };
 
         /// <summary>The grant object kinds whose targets live in a schema; a schema itself, a database, a role, and so on do not.</summary>
-        private static readonly HashSet<string> SchemaScopedGrantKinds = new(StringComparer.OrdinalIgnoreCase) { "table", "sequence", "function", "procedure", "routine" };
+        private static readonly HashSet<string> SchemaScopedGrantKinds = new(StringComparer.OrdinalIgnoreCase) { "table", "sequence", "function", "procedure", "routine", "type", "domain" };
 
         /// <summary>A named object's grant target takes the default; a schema-level target (the schema itself, or <c>ALL ... IN SCHEMA</c>) and a role do not.</summary>
         private Func<GrantTarget, GrantTarget> ApplyTarget(GrantNode grant)

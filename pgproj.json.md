@@ -180,6 +180,21 @@ only when the publish has changes; otherwise it is left out, with the files it i
 markers in a file, and a tenant's variable (`:'tenant_id'`) in these scripts are errors when the project is loaded or built; a tenant's own scripts are
 `tenants.predeploy` and `tenants.postdeploy`.
 
+#### Transactions
+
+The scripts run inside the transaction `publish` runs in, so they must not end it. `build` reports, naming the file and line, a statement that ends the
+transaction (`COMMIT`, `END`, `ROLLBACK`, `ABORT`, `PREPARE TRANSACTION`, `COMMIT PREPARED`, `ROLLBACK PREPARED`) and one PostgreSQL refuses inside a
+transaction block (`VACUUM`, `CREATE` or `DROP DATABASE`, `CREATE` or `DROP TABLESPACE`, `ALTER SYSTEM`, `CREATE` or `DROP INDEX CONCURRENTLY`,
+`REINDEX ... CONCURRENTLY`, `REINDEX DATABASE`, `REINDEX SYSTEM`, `CLUSTER` without a table, `DISCARD ALL`) as errors, so `publish` does not run;
+a `BEGIN` or `START TRANSACTION` is a warning. A savepoint (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`) is fine. Run a statement that needs to be outside a
+transaction separately.
+
+#### Variables
+
+A script can name a value with psql's syntax, `:'name'` or `:"name"`, instead of writing it: a password, or a value that differs between environments.
+`publish --execute` takes it from the environment variable `PGPROJ_VAR_<name>`; a printed or written script keeps it as written. See
+[Variables in the deploy scripts](docs/notes/variables.md).
+
 ### `excludeGrants` / `excludeRoleMemberships`
 
 These optional fields let a project opt out of modeling grants and/or role memberships entirely — for example,

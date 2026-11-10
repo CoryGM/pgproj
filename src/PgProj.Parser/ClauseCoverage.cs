@@ -24,7 +24,9 @@ internal static class ClauseCoverage
     private static readonly Dictionary<string, HashSet<string>> Known = new(StringComparer.Ordinal)
     {
         ["CreateStmt"] = ["accessMethod", "constraints", "if_not_exists", "inhRelations", "ofTypename", "options", "partbound", "partspec", "relation", "tableElts", "tablespacename"],
-        ["ColumnDef"] = ["collClause", "colname", "compression", "constraints", "generated", "is_not_null", "location", "storage", "storage_name", "typeName"],
+        ["ColumnDef"] = ["collClause", "colname", "compression", "constraints", "fdwoptions", "generated", "is_not_null", "location", "storage", "storage_name", "typeName"],
+        // A foreign table (G-133): its base is read as a CreateStmt.
+        ["CreateForeignTableStmt"] = ["base", "options", "servername"],
         ["Constraint"] = ["access_method", "conname", "contype", "deferrable", "exclusions", "fk_attrs", "fk_del_action", "fk_del_set_cols", "fk_matchtype", "fk_upd_action", "fk_with_period", "generated_kind", "generated_when", "including", "initdeferred", "is_enforced", "is_no_inherit", "keys", "location", "nulls_not_distinct", "options", "pk_attrs", "pk_with_period", "pktable", "raw_expr", "skip_validation", "where_clause", "without_overlaps"],
         ["IndexStmt"] = ["accessMethod", "concurrent", "deferrable", "idxcomment", "idxname", "if_not_exists", "indexIncludingParams", "indexOid", "indexParams", "initdeferred", "isconstraint", "iswithoutoverlaps", "nulls_not_distinct", "oldNumber", "options", "primary", "relation", "reset_default_tblspc", "transformed", "unique", "whereClause"],
         ["IndexElem"] = ["collation", "expr", "name", "nulls_ordering", "opclass", "opclassopts", "ordering"],

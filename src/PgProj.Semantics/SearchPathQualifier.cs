@@ -132,6 +132,7 @@ internal static class SearchPathQualifier
                 AlterTableColumnDefaultNode columnDefault => columnDefault with { SchemaName = OnTable(columnDefault, columnDefault.TableName) },
                 AlterTableAddIdentityNode addIdentity => addIdentity with { SchemaName = OnTable(addIdentity, addIdentity.TableName) },
                 AlterTableColumnStorageNode columnStorage => columnStorage with { SchemaName = OnTable(columnStorage, columnStorage.TableName) },
+                AlterTableColumnOptionsNode columnOptions => columnOptions with { SchemaName = OnTable(columnOptions, columnOptions.TableName) },
                 AlterTableAttachPartitionNode attach => attach with
                 {
                     SchemaName = OnTable(attach, attach.TableName),
@@ -258,6 +259,8 @@ internal static class SearchPathQualifier
                 "function" => _functionSchemas,
                 "procedure" => _procedureSchemas,
                 "routine" => Merge(_functionSchemas, _procedureSchemas),
+                // A domain is a type: GRANT ... ON TYPE names one too (G-337).
+                "type" or "domain" => _typeSchemas,
                 _ => null,
             };
 

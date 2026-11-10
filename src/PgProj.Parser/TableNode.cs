@@ -6,6 +6,12 @@ public sealed record TableNode(
     IReadOnlyList<ColumnNode> Columns,
     string? Comment = null) : SqlNode("Table", Name, SchemaName)
 {
+    /// <summary>The server of a foreign table (<c>CREATE FOREIGN TABLE ... SERVER s</c>, G-133); null for a table of the database's own.</summary>
+    public string? ForeignServer { get; init; }
+
+    /// <summary>A foreign table's <c>OPTIONS (...)</c>, in the order written (G-133).</summary>
+    public IReadOnlyList<ForeignOptionNode> ForeignOptions { get; init; } = [];
+
     /// <summary>True for <c>CREATE UNLOGGED TABLE</c> (G-24b).</summary>
     public bool IsUnlogged { get; init; }
 

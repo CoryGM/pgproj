@@ -8,6 +8,9 @@ warning. `PUBLIC` is not a role. A role that the project's pre-deploy script cre
 `CREATE ROLE`, `CREATE USER`, or `CREATE GROUP` and name the role (a guarded `DO` block, for example
 `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app') THEN CREATE ROLE app; END IF; END $$;`; comments do not count). Otherwise create the role on the server first.
 
+A deploy script can set a role's password without writing it: `ALTER ROLE app PASSWORD :'app_password';`, the value from `PGPROJ_VAR_app_password` when
+`publish --execute` runs. The server may log it, and `pg_stat_statements` keeps it: see [Variables in the deploy scripts](variables.md).
+
 ---
 
 [All notes](README.md) · [Commands](../commands.md) · [README](../../README.md)

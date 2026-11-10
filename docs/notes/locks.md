@@ -62,13 +62,16 @@ Publish failed: step 1 of 2 after the commit failed (build the index of unique c
 
 Fix the cause and run it again: the next `publish --concurrently` compares the database as it now is and does what is left.
 
-**A printed or written script** (`--dry-run`, `--output`) has the statements for after the commit below this line:
+**A printed or written script** (`--dry-run`, `--output`) has the transaction between `BEGIN;` and `COMMIT;`, then the statements for after the commit
+below this line:
 
 ```
 -- pgproj --concurrently: the statements below run outside a transaction, one at a time
 ```
 
-Run the part above the line in one transaction and the part below it without one, one statement at a time: `psql --single-transaction` would make `CREATE INDEX CONCURRENTLY` fail, and `publish` warns so.
+Run it with `psql -v ON_ERROR_STOP=1 -f deploy.sql`: psql then stops at the first error, so the statements below the line are not run after a
+transaction that failed and was rolled back. `publish` warns so. Do not add `--single-transaction`, which would make `CREATE INDEX CONCURRENTLY` fail.
+With `--lock-timeout`, the script starts with `SET lock_timeout`, before the `BEGIN`, so it bounds both parts.
 
 ### An `INVALID` index
 

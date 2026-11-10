@@ -91,6 +91,16 @@ public sealed partial class PgProjEngine
         var project = snapshot.Project;
         var model = built.Model;
 
+        // The direction first, before the source's diagnostics (G-349): the target is named by its connection string, as the connection will name it.
+        if (source is not null)
+        {
+            progress?.Report(new EngineEvent(EngineEventKind.Direction, Message: SourceProject.Direction(source.Source, SourceProject.EndOf(source.TargetConnectionString)), Level: EngineEventLevel.Information));
+            progress?.Report(new EngineEvent(
+                EngineEventKind.Direction,
+                Message: "In what follows, an object marked + exists only in the source, one marked - only in the target, and ~ in both with a difference.",
+                Level: EngineEventLevel.Information));
+        }
+
         if (request.AfterBuild is { } afterBuild)
         {
             await afterBuild(EngineMasking.Build(state.ToBuildResult()), cancellationToken);
@@ -157,13 +167,6 @@ public sealed partial class PgProjEngine
             await source.EnsureNotTheTargetAsync(connection, cancellationToken);
             sourceEnd = source.Source;
             targetEnd = SourceProject.EndOf(connection);
-
-            // Said once the target is known, before it is read, as diff has always said it (G-316).
-            progress?.Report(new EngineEvent(EngineEventKind.Direction, Message: SourceProject.Direction(sourceEnd, targetEnd), Level: EngineEventLevel.Information));
-            progress?.Report(new EngineEvent(
-                EngineEventKind.Direction,
-                Message: "In what follows, an object marked + exists only in the source, one marked - only in the target, and ~ in both with a difference.",
-                Level: EngineEventLevel.Information));
         }
 
         await LiveComparison.ApplySearchPathAsync(connection, project, cancellationToken);

@@ -1,4 +1,4 @@
-﻿using PgProj.Parser;
+using PgProj.Parser;
 
 namespace PgProj.Semantics;
 
@@ -305,6 +305,7 @@ internal sealed class ColumnPass
             Storage = columnNode.Storage,
             IsStorageSetByAlter = columnNode.IsStorageSetByAlter,
             Compression = columnNode.Compression,
+            ForeignOptions = ForeignOptionDefinition.From(columnNode.ForeignOptions),
             TypeModifiers = columnNode.TypeModifiers,
             ArrayDimensions = columnNode.ArrayDimensions,
             IntervalFields = columnNode.IntervalFields,

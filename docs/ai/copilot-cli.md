@@ -43,7 +43,12 @@ Copilot must preserve:
   different meaning per command; do not conflate them)
 - -o (short alias for `init --output`)
 - --execute
-- --dry-run
+- --dry-run (with `--output`, and `publish` without `--execute`: the script printed or written carries its own transaction, `BEGIN;` ... `COMMIT;`, after a
+  `SET lock_timeout` and the superuser comment, before the `--concurrently` marker, one per part with tenants; `--execute` runs the same statements in a
+  transaction it opens and is unchanged; a plain script is no longer warned about — G-165, the user's design of 2026-11-09)
+- `PGPROJ_VAR_<name>` (`publish`, and `about`, which lists the names: the values of the deploy scripts' variables, `:'name'` and `:"name"`, read by the CLI
+  and passed as `PublishRequest.Variables`; only `--execute` fills them in; a printed or written script keeps them; a missing one refuses `--execute`;
+  `tenant_schema` and `tenant_id` cannot be given; no option and no `pgproj.json` setting — G-336, the user's design of 2026-11-09)
 - --force (`init`'s overwrite-safety opt-in)
 - --name (`init`'s generated-project-name override)
 - --allow-destructive (`publish`'s destructive-change opt-in, G-35)
@@ -54,10 +59,11 @@ Copilot must preserve:
   `NOT VALID` (a foreign key on a partitioned table only from PostgreSQL 18); a failed step has what it built dropped, is named, and exits `1`; a printed or written
   script puts these below the line `-- pgproj --concurrently: ...`; not with `--comments-only`; no `pgproj.json` setting — G-271, design approved with corrections
   by the user 2026-10-14. Also: an `INVALID` index is read (`diff` reports `Valid`), rebuilt by `publish`, and left out by `init` with a warning)
+- --apply-secrets [names] (`publish`: send the secrets of user mappings that exist again, every variable their options name or only those listed, as `ALTER USER MAPPING ... OPTIONS (SET|ADD ...)`; a secret is otherwise sent only on create; `PublishRequest.ApplySecrets` — G-132, G-336's rotation option (c), the user's design of 2026-11-10)
 - --allow-lock-limit (`publish`: let `--execute` run a script estimated to need more locks than the server's lock table holds, `max_locks_per_transaction *
   (max_connections + max_prepared_transactions)`; without it `--execute` refuses such a script before anything runs; from 80% of it `publish` warns; `--dry-run`
   and `--output` only warn; per run, no `pgproj.json` setting - G-280, option (b), the user's decision of 2026-10-13, details 2026-10-14)
-- --allow-superuser-statements (`publish`: consent, per run, for `--execute` to run statements only a superuser can run: an event trigger created, changed, or dropped, a table's internal foreign-key triggers enabled or disabled (`ALTER TABLE ... TRIGGER ALL`, G-261), and a routine created or replaced `LEAKPROOF` or in an untrusted language; without it `--execute` refuses such a script even for a superuser, with it a role that is not a superuser is refused before anything runs; a printed or written script starts with a comment naming them; no `pgproj.json` setting — G-265, design signed off by the user 2026-10-13)
+- --allow-superuser-statements (`publish`: consent, per run, for `--execute` to run statements only a superuser can run: an event trigger created, changed, or dropped, a table's internal foreign-key triggers enabled or disabled (`ALTER TABLE ... TRIGGER ALL`, G-261), a routine created or replaced `LEAKPROOF` or in an untrusted language, and a base type or its shell created or its options changed with `ALTER TYPE ... SET` (G-267); without it `--execute` refuses such a script even for a superuser, with it a role that is not a superuser is refused before anything runs; a printed or written script starts with a comment naming them; no `pgproj.json` setting — G-265, design signed off by the user 2026-10-13)
 - --comments-only (`publish`: deploy only the `COMMENT ON` statements of the script, not the pre/post-deploy scripts or any other operation; a comment on an object the database lacks is skipped with a warning, the statement running in a `DO` block that catches "does not exist"; added at the user's request 2026-10-09, with the skip chosen by the user — G-169)
 - --exclude-grants / --exclude-role-memberships (`build`/`diff`/`publish`: override pgproj.json's
   excludeGrants/excludeRoleMemberships for one run, in either direction; `init`: skip scaffolding that category

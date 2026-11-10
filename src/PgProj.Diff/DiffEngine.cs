@@ -39,6 +39,9 @@ public sealed class DiffEngine
         var dictionaryDiff = DiffTextSearchDictionaries(oldModel, newModel);
         var configurationDiff = DiffTextSearchConfigurations(oldModel, newModel);
         var publicationDiff = DiffPublications(oldModel, newModel);
+        var wrapperDiff = DiffModelNodes(oldModel.ForeignDataWrappers, newModel.ForeignDataWrappers, "DiffForeignDataWrappers", BuildForeignDataWrapperModificationDetails);
+        var serverDiff = DiffModelNodes(oldModel.ForeignServers, newModel.ForeignServers, "DiffForeignServers", BuildForeignServerModificationDetails);
+        var mappingDiff = DiffModelNodes(oldModel.UserMappings, ForConnectedRole(newModel.UserMappings, oldModel.ConnectedRole), "DiffUserMappings", BuildUserMappingModificationDetails);
         var ownerDiff = DiffOwners(oldModel, newModel);
         var schemaDiff = DiffSchemaDefinitions(oldModel, newModel);
 
@@ -107,6 +110,15 @@ public sealed class DiffEngine
             AddedPublications = publicationDiff.Added,
             RemovedPublications = publicationDiff.Removed,
             ModifiedPublications = publicationDiff.Modified,
+            AddedForeignDataWrappers = wrapperDiff.Added,
+            RemovedForeignDataWrappers = wrapperDiff.Removed,
+            ModifiedForeignDataWrappers = wrapperDiff.Modified,
+            AddedForeignServers = serverDiff.Added,
+            RemovedForeignServers = serverDiff.Removed,
+            ModifiedForeignServers = serverDiff.Modified,
+            AddedUserMappings = mappingDiff.Added,
+            RemovedUserMappings = mappingDiff.Removed,
+            ModifiedUserMappings = mappingDiff.Modified,
             AddedOwners = ownerDiff.Added,
             RemovedOwners = [],
             ModifiedOwners = ownerDiff.Modified,
@@ -200,6 +212,15 @@ public sealed class DiffEngine
         AddChanges(result.AddedPublications, added);
         AddChanges(result.RemovedPublications, removed);
         AddChanges(result.ModifiedPublications, modified);
+        AddChanges(result.AddedForeignDataWrappers, added);
+        AddChanges(result.RemovedForeignDataWrappers, removed);
+        AddChanges(result.ModifiedForeignDataWrappers, modified);
+        AddChanges(result.AddedForeignServers, added);
+        AddChanges(result.RemovedForeignServers, removed);
+        AddChanges(result.ModifiedForeignServers, modified);
+        AddChanges(result.AddedUserMappings, added);
+        AddChanges(result.RemovedUserMappings, removed);
+        AddChanges(result.ModifiedUserMappings, modified);
         AddChanges(result.AddedOwners, added);
         AddChanges(result.ModifiedOwners, modified);
         AddChanges(result.AddedSchemaDefinitions, added);
@@ -806,6 +827,9 @@ public sealed class DiffEngine
     {
         var oldGrants = OrderedGrants(oldModel);
         var newGrants = OrderedGrants(newModel);
+        DiffRevokedDefaults(oldModel, newModel, oldGrants, newGrants, added, removed);
+        oldGrants = oldGrants.Where(static grant => !grant.RevokesDefault).ToArray();
+        newGrants = newGrants.Where(static grant => !grant.RevokesDefault).ToArray();
 
         foreach (var oldGrant in oldGrants)
         {
@@ -822,11 +846,14 @@ public sealed class DiffEngine
         var newAtoms = newGrants.Select(grant => (Grant: grant, Atoms: GrantExpansion.Expand(grant, newModel, connectedRole))).ToArray();
         var wanted = newAtoms.SelectMany(static item => item.Atoms).ToHashSet();
 
+        // What the project's default-privilege rules may give an object is allowed, not required (G-339, option (c)).
+        var tolerated = GrantExpansion.DefaultPrivilegeTolerance(newModel);
+
         var inEffect = new HashSet<GrantAtom>();
         foreach (var oldGrant in oldGrants)
         {
             var atoms = GrantExpansion.Expand(oldGrant, oldModel, connectedRole);
-            var isExtra = atoms.Any(atom => !atom.IsImplicit && !atom.IsRoleMembership && !wanted.Contains(atom));
+            var isExtra = atoms.Any(atom => !atom.IsImplicit && !atom.IsRoleMembership && !wanted.Contains(atom) && !tolerated(atom));
 
             if (isExtra)
             {
@@ -857,6 +884,71 @@ public sealed class DiffEngine
                 Node = newGrant,
             });
         }
+    }
+
+    /// <summary>
+    /// <c>REVOKE ... FROM PUBLIC</c> of PostgreSQL's default on a type or domain (G-337), a function or procedure (G-338), or in a rule for new types or functions
+    /// (G-338, part (i)), each a <see cref="GrantDefinition.RevokesDefault"/> compared by what it names: one only the project has is added (the default is taken
+    /// away), and one only the database has is removed (<c>PUBLIC</c> is given its privilege back). Not removed: one on an object the project drops, which takes its
+    /// privileges with it, and one on a type or routine the project's own rule would create without the default (allowed, not required; G-339's option (c)). A
+    /// rule <c>FOR ROLE</c> the role that deploys is the same as one without <c>FOR ROLE</c>. On the <c>public</c> schema (G-341) a revoke is one per privilege:
+    /// <c>USAGE</c> is compared both ways, and <c>CREATE</c> (<c>PUBLIC</c>'s default there before PostgreSQL 15) only when the project states it, so a project that
+    /// does not is never made to give <c>CREATE</c> back.
+    /// </summary>
+    private static void DiffRevokedDefaults(
+        DatabaseModel oldModel,
+        DatabaseModel newModel,
+        IReadOnlyList<GrantDefinition> oldGrants,
+        IReadOnlyList<GrantDefinition> newGrants,
+        ICollection<AddedChange> added,
+        ICollection<RemovedChange> removed)
+    {
+        var connectedRole = oldModel.ConnectedRole;
+        (string ObjectKey, string? ForRole, string Privileges) Identity(GrantDefinition grant)
+            => (grant.ObjectKey ?? string.Empty,
+                grant.ForRole is not null && string.Equals(grant.ForRole, connectedRole, StringComparison.OrdinalIgnoreCase) ? null : grant.ForRole,
+                string.Join(",", grant.Privileges.Order(StringComparer.Ordinal)));
+
+        var oldIdentities = oldGrants.Where(static grant => grant.RevokesDefault).Select(Identity).ToHashSet();
+        var newIdentities = newGrants.Where(static grant => grant.RevokesDefault).Select(Identity).ToHashSet();
+
+        foreach (var oldGrant in oldGrants.Where(grant => grant.RevokesDefault && !newIdentities.Contains(Identity(grant))))
+        {
+            var objectKey = oldGrant.ObjectKey ?? string.Empty;
+            if ((oldGrant.ObjectName is not null && !ProjectHasObject(newModel, oldGrant))
+                || GrantExpansion.RevokesDefaultByRule(newModel, objectKey)
+                || IsPublicSchemaCreateRevoke(oldGrant))
+            {
+                continue;
+            }
+
+            removed.Add(new RemovedChange { NodeId = oldGrant.Key, NodeKind = ChangeRecord.MapKind(oldGrant), Node = oldGrant });
+        }
+
+        foreach (var newGrant in newGrants.Where(grant => grant.RevokesDefault && !oldIdentities.Contains(Identity(grant))))
+        {
+            added.Add(new AddedChange { NodeId = newGrant.Key, NodeKind = ChangeRecord.MapKind(newGrant), Node = newGrant });
+        }
+    }
+
+    /// <summary><c>REVOKE CREATE ON SCHEMA public FROM PUBLIC</c> (G-341): compared only when the project states it.</summary>
+    private static bool IsPublicSchemaCreateRevoke(GrantDefinition grant)
+        => grant.ObjectKey == "schema:public" && grant.Privileges.Contains("CREATE", StringComparer.Ordinal);
+
+    /// <summary>Whether <paramref name="model"/> has the type, function, or procedure a revoked default names.</summary>
+    private static bool ProjectHasObject(DatabaseModel model, GrantDefinition revoked)
+    {
+        var objectKey = revoked.ObjectKey ?? string.Empty;
+        bool InSchema(string? schemaName) => string.Equals(schemaName, revoked.SchemaName, StringComparison.Ordinal);
+        return objectKey switch
+        {
+            _ when objectKey.StartsWith("type:", StringComparison.Ordinal) => model.Types.ContainsKey(DatabaseModel.CreateKey(revoked.SchemaName, revoked.ObjectName!)),
+            _ when objectKey.StartsWith("function:", StringComparison.Ordinal)
+                => model.Functions.Values.Any(function => InSchema(function.SchemaName) && GrantExpansion.RoutineObjectName(function) == revoked.ObjectName),
+            _ when objectKey.StartsWith("procedure:", StringComparison.Ordinal)
+                => model.Procedures.Values.Any(procedure => InSchema(procedure.SchemaName) && GrantExpansion.RoutineObjectName(procedure) == revoked.ObjectName),
+            _ => true,
+        };
     }
 
     private static GrantDefinition[] OrderedGrants(DatabaseModel model)
@@ -967,6 +1059,13 @@ public sealed class DiffEngine
         if (newTable.AccessMethod is not null)
         {
             AddValueDifference(details, nameof(TableDefinition.AccessMethod), oldTable.AccessMethod, newTable.AccessMethod, StringComparison.Ordinal);
+        }
+
+        // A foreign table's server and options (G-133): by name, in no order.
+        AddValueDifference(details, nameof(TableDefinition.ForeignServer), oldTable.ForeignServer, newTable.ForeignServer, StringComparison.Ordinal);
+        if (ForeignOptions.Differences(oldTable.ForeignOptions, newTable.ForeignOptions).Count > 0)
+        {
+            AddValueDifference(details, nameof(TableDefinition.ForeignOptions), string.Join(", ", ForeignOptions.Describe(oldTable.ForeignOptions)), string.Join(", ", ForeignOptions.Describe(newTable.ForeignOptions)), StringComparison.Ordinal);
         }
         AddValueDifference(details, nameof(TableDefinition.IsRowSecurityEnabled), oldTable.IsRowSecurityEnabled, newTable.IsRowSecurityEnabled);
         AddValueDifference(details, nameof(TableDefinition.IsRowSecurityForced), oldTable.IsRowSecurityForced, newTable.IsRowSecurityForced);
@@ -1096,6 +1195,12 @@ public sealed class DiffEngine
         if (ColumnDefinition.IsCompressionChange(oldColumn, newColumn))
         {
             AddOrUpdateDetail(details, nameof(ColumnDefinition.Compression), oldColumn.Compression ?? "default", newColumn.Compression);
+        }
+
+        // A foreign table's column's options (G-133).
+        if (ForeignOptions.Differences(oldColumn.ForeignOptions, newColumn.ForeignOptions).Count > 0)
+        {
+            AddOrUpdateDetail(details, nameof(ColumnDefinition.ForeignOptions), string.Join(", ", ForeignOptions.Describe(oldColumn.ForeignOptions)), string.Join(", ", ForeignOptions.Describe(newColumn.ForeignOptions)));
         }
 
         // The default is compared in its canonical form, which is equal for PostgreSQL's spelling ('x'::text) and the
@@ -1305,7 +1410,10 @@ public sealed class DiffEngine
         // are not compared on their own (G-100, as for a view in G-96 and a type in G-99): the cast PostgreSQL stores on a literal in
         // the predicate ('x'::s.st) added a referenced type the project's own predicate doesn't name.
 
-        if (!KeyElementsEqual(oldIndex.KeyElements, newIndex.KeyElements))
+        // G-344: when PostgreSQL rendered both sides' keys, an expression key is compared by its rendering, which types each literal as the stored
+        // expression does (c = 'r' on an enum is c = 'r'::color); a column, its order, class, and collation are compared as before.
+        var (oldKeys, newKeys) = WithRenderedKeys(oldIndex, newIndex);
+        if (!KeyElementsEqual(oldKeys, newKeys))
         {
             AddOrUpdateDetail(
                 details,
@@ -1345,6 +1453,35 @@ public sealed class DiffEngine
         }
 
         return details;
+    }
+
+    /// <summary>
+    /// The two indexes' keys, each expression key given its server rendering as its comparison form when both sides have one for the same number of keys (G-344);
+    /// otherwise the keys as they are.
+    /// </summary>
+    private static (IReadOnlyList<IndexKeyElementDefinition> Old, IReadOnlyList<IndexKeyElementDefinition> New) WithRenderedKeys(IndexDefinition oldIndex, IndexDefinition newIndex)
+    {
+        if (oldIndex.ServerRenderedKeys is not { } oldRendered
+            || newIndex.ServerRenderedKeys is not { } newRendered
+            || oldRendered.Count != oldIndex.KeyElements.Count
+            || newRendered.Count != newIndex.KeyElements.Count
+            || oldIndex.KeyElements.Count != newIndex.KeyElements.Count)
+        {
+            return (oldIndex.KeyElements, newIndex.KeyElements);
+        }
+
+        var oldKeys = oldIndex.KeyElements.ToArray();
+        var newKeys = newIndex.KeyElements.ToArray();
+        for (var key = 0; key < oldKeys.Length; key++)
+        {
+            if (oldKeys[key].RawExpression is not null && newKeys[key].RawExpression is not null && oldRendered[key] is { } oldText && newRendered[key] is { } newText)
+            {
+                oldKeys[key] = oldKeys[key] with { NormalizedExpression = oldText };
+                newKeys[key] = newKeys[key] with { NormalizedExpression = newText };
+            }
+        }
+
+        return (oldKeys, newKeys);
     }
 
     private static bool KeyElementsEqual(IReadOnlyList<IndexKeyElementDefinition> oldElements, IReadOnlyList<IndexKeyElementDefinition> newElements)
@@ -1693,6 +1830,63 @@ public sealed class DiffEngine
     /// What differs between two publications of one name (G-134): whether it is <c>FOR ALL TABLES</c>, each option in comparison form (the operations it publishes as a
     /// set, PostgreSQL's defaults left out), the schemas it names, and the tables it names, each with its column list (a set) and its row filter (in comparison form).
     /// </summary>
+    /// <summary>
+    /// A project's user mappings by the key the database gives them (G-132): <c>FOR CURRENT_USER</c> is stored as the role that runs it, which is the role the live model
+    /// was read as. The definitions are unchanged, so the script still writes <c>CURRENT_USER</c>, as the project does.
+    /// </summary>
+    private static IReadOnlyDictionary<string, UserMappingDefinition> ForConnectedRole(IReadOnlyDictionary<string, UserMappingDefinition> mappings, string? connectedRole)
+        => connectedRole is null || !mappings.Values.Any(static mapping => mapping.Role == PgProj.Parser.UserMappingNode.CurrentUser)
+            ? mappings
+            : mappings.Values.ToDictionary(
+                mapping => mapping.Role == PgProj.Parser.UserMappingNode.CurrentUser ? ForeignDataKeys.UserMapping(connectedRole, mapping.Server) : mapping.Key,
+                PgProj.Parser.SqlIdentifiers.NameComparer);
+
+    private static void AddForeignOptionDifference(List<ModificationDetail> details, IReadOnlyList<ForeignOptionDefinition> oldOptions, IReadOnlyList<ForeignOptionDefinition> newOptions)
+    {
+        // Compared by name; a value given by a variable, or a password, only by whether it is there (G-132, item 5 and 6), and never shown.
+        if (ForeignOptions.Differences(oldOptions, newOptions).Count > 0)
+        {
+            AddValueDifference(details, "Options", string.Join(", ", ForeignOptions.Describe(oldOptions)), string.Join(", ", ForeignOptions.Describe(newOptions)), StringComparison.Ordinal);
+        }
+    }
+
+    private List<ModificationDetail> BuildForeignDataWrapperModificationDetails(ForeignDataWrapperDefinition oldWrapper, ForeignDataWrapperDefinition newWrapper)
+    {
+        var details = new List<ModificationDetail>();
+        AddValueDifference(details, nameof(ForeignDataWrapperDefinition.Handler), oldWrapper.Handler, newWrapper.Handler, StringComparison.Ordinal);
+        AddValueDifference(details, nameof(ForeignDataWrapperDefinition.Validator), oldWrapper.Validator, newWrapper.Validator, StringComparison.Ordinal);
+        AddForeignOptionDifference(details, oldWrapper.Options, newWrapper.Options);
+        AddValueDifference(details, nameof(ForeignDataWrapperDefinition.Comment), oldWrapper.Comment, newWrapper.Comment, StringComparison.Ordinal);
+        return details;
+    }
+
+    private List<ModificationDetail> BuildForeignServerModificationDetails(ForeignServerDefinition oldServer, ForeignServerDefinition newServer)
+    {
+        var details = new List<ModificationDetail>();
+        AddValueDifference(details, nameof(ForeignServerDefinition.Wrapper), oldServer.Wrapper, newServer.Wrapper, StringComparison.Ordinal);
+        AddValueDifference(details, nameof(ForeignServerDefinition.ServerType), oldServer.ServerType, newServer.ServerType, StringComparison.Ordinal);
+        // Compared only when the project states one: ALTER SERVER sets a VERSION but cannot take one away.
+        if (newServer.Version is not null)
+        {
+            AddValueDifference(details, nameof(ForeignServerDefinition.Version), oldServer.Version, newServer.Version, StringComparison.Ordinal);
+        }
+        AddForeignOptionDifference(details, oldServer.Options, newServer.Options);
+        AddValueDifference(details, nameof(ForeignServerDefinition.Comment), oldServer.Comment, newServer.Comment, StringComparison.Ordinal);
+        return details;
+    }
+
+    private List<ModificationDetail> BuildUserMappingModificationDetails(UserMappingDefinition oldMapping, UserMappingDefinition newMapping)
+    {
+        // Options the role pgproj connects as cannot read are not compared (item 4).
+        var details = new List<ModificationDetail>();
+        if (!oldMapping.OptionsUnreadable && !newMapping.OptionsUnreadable)
+        {
+            AddForeignOptionDifference(details, oldMapping.Options, newMapping.Options);
+        }
+
+        return details;
+    }
+
     private List<ModificationDetail> BuildPublicationModificationDetails(PublicationDefinition oldPublication, PublicationDefinition newPublication)
     {
         var details = new List<ModificationDetail>();
@@ -1947,6 +2141,8 @@ public sealed class DiffEngine
         AddListDifference(details, nameof(TypeDefinition.CompositeFields), FormatCompositeFields(oldType.CompositeFields), FormatCompositeFields(newType.CompositeFields));
         AddListDifference(details, nameof(TypeDefinition.RangeOptions), FormatRangeOptions(oldType.RangeOptions, oldType.Name), FormatRangeOptions(newType.RangeOptions, newType.Name));
         AddOrderedListDifference(details, nameof(TypeDefinition.EnumLabels), oldType.EnumLabels, newType.EnumLabels);
+        // A base type's options (G-267), each with PostgreSQL's default filled in when unstated; the statement's text is not compared.
+        AddListDifference(details, nameof(TypeDefinition.BaseTypeOptions), FormatBaseTypeOptions(oldType.BaseTypeOptions), FormatBaseTypeOptions(newType.BaseTypeOptions));
 
         // An enum with no labels and a composite with no fields have nothing above to tell them apart (G-249, G-268); their form does. A type with any structure
         // already shows its change there, so this is reported only when the structure says nothing.
@@ -2367,6 +2563,37 @@ public sealed class DiffEngine
     {
         var parts = PgProj.Parser.SqlIdentifiers.SplitQualifiedName(name);
         return parts.Count == 2 && parts[0] is "public" or "pg_catalog" ? parts[1] : string.Join('.', parts);
+    }
+
+    /// <summary>A base type's options (G-267) as <c>NAME = value</c>, every one of them, in their comparison form; nothing for another kind of type.</summary>
+    internal static IEnumerable<string> FormatBaseTypeOptions(BaseTypeOptionsDefinition? options)
+    {
+        if (options is null)
+        {
+            yield break;
+        }
+
+        foreach (var option in BaseTypeOptionsDefinition.FunctionOptions)
+        {
+            yield return $"{option} = {options.Functions.GetValueOrDefault(option) ?? "NONE"}";
+        }
+
+        if (options.Like is { } like)
+        {
+            yield return $"LIKE = {like}";
+        }
+
+        string Unknown<T>(T? value, Func<T, string> format) where T : struct => value is { } known ? format(known) : "from LIKE";
+        yield return $"INTERNALLENGTH = {Unknown(options.InternalLength, static length => length < 0 ? "VARIABLE" : length.ToString(System.Globalization.CultureInfo.InvariantCulture))}";
+        yield return $"PASSEDBYVALUE = {Unknown(options.PassedByValue, static value => value ? "true" : "false")}";
+        yield return $"ALIGNMENT = {options.Alignment switch { "c" => "char", "s" => "int2", "i" => "int4", "d" => "double", _ => "from LIKE" }}";
+        yield return $"STORAGE = {options.Storage switch { "p" => "plain", "e" => "external", "m" => "main", "x" => "extended", _ => "from LIKE" }}";
+        yield return $"CATEGORY = '{options.Category}'";
+        yield return $"PREFERRED = {(options.Preferred ? "true" : "false")}";
+        yield return $"DEFAULT = {(options.Default is { } value ? "'" + value + "'" : "NONE")}";
+        yield return $"ELEMENT = {options.Element ?? "NONE"}";
+        yield return $"DELIMITER = '{options.Delimiter}'";
+        yield return $"COLLATABLE = {(options.Collatable ? "true" : "false")}";
     }
 
     private static IEnumerable<string> FormatRangeOptions(RangeTypeOptionsDefinition? options, string? rangeName)

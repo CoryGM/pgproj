@@ -10,7 +10,6 @@ public sealed class CoverageListTests
     /// <summary>Statements the reader names in its own cases rather than in its table.</summary>
     private static readonly string[] CaseKinds =
     [
-        "CREATE TYPE (base type)",
         "CREATE TYPE (shell type)",
         "CREATE COLLATION ... FROM",
         "ALTER TEXT SEARCH CONFIGURATION ... REPLACE",
@@ -38,7 +37,6 @@ public sealed class CoverageListTests
     {
         string[] statements =
         [
-            "CREATE TYPE t (INPUT = f_in, OUTPUT = f_out);",
             "CREATE TYPE t;",
             "CREATE COLLATION c FROM \"C\";",
             "ALTER TEXT SEARCH CONFIGURATION c ALTER MAPPING REPLACE english_stem WITH simple;",
@@ -51,7 +49,8 @@ public sealed class CoverageListTests
 
         for (var index = 0; index < statements.Length; index++)
         {
-            var messages = new PgQueryParser().Parse(statements[index]).Diagnostics.Select(static diagnostic => diagnostic.Message);
+            // A shell type alone is reported once every file is read, by BaseTypeApplier (G-267); a base type is modeled and is not reported.
+            var messages = BaseTypeApplier.Apply([new PgQueryParser().Parse(statements[index])]).Single().Diagnostics.Select(static diagnostic => diagnostic.Message);
             Assert.IsTrue(messages.Any(message => message.StartsWith(CaseKinds[index] + " ", StringComparison.Ordinal)), $"{statements[index]}: {string.Join(" | ", messages)}");
         }
     }

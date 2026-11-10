@@ -46,20 +46,22 @@ public sealed class TypeDeclarationParsingTests
         Assert.AreEqual("shell_type", node.Name);
         Assert.AreEqual("public", node.SchemaName, "An unqualified name is the object in public (G-114).");
         Assert.IsTrue(node.IsShell);
-        Assert.IsEmpty(node.SupportFunctions);
     }
 
     [TestMethod]
-    public void ABaseTypeIsReadWithTheFunctionsItNamesAsWritten()
+    public void ABaseTypeIsATypeWithItsOptionsAsWritten()
     {
-        var node = Single<BaseTypeNode>("CREATE TYPE app.xint4 (INTERNALLENGTH = 4, INPUT = app.xint4in, OUTPUT = xint4out, RECEIVE = app.xint4recv, ALIGNMENT = int4, PASSEDBYVALUE);");
+        // Replaces ABaseTypeIsReadWithTheFunctionsItNamesAsWritten: a base type was only a marker until the user chose to model it (G-267, 2026-11-09).
+        const string sql = "CREATE TYPE app.xint4 (INTERNALLENGTH = 4, INPUT = app.xint4in, OUTPUT = xint4out, RECEIVE = app.xint4recv, ALIGNMENT = int4, PASSEDBYVALUE, CATEGORY = 'N', PREFERRED = true, ELEMENT = \"My Type\", INTERNALLENGTH = VARIABLE)";
+        var node = Single<TypeNode>(sql + ";");
 
         Assert.AreEqual("xint4", node.Name);
         Assert.AreEqual("app", node.SchemaName);
-        Assert.IsFalse(node.IsShell);
+        Assert.AreEqual("base", node.Form);
+        StringAssert.StartsWith(node.RawStatementSql, "CREATE TYPE app.xint4 (");
         CollectionAssert.AreEqual(
-            new[] { "app.xint4in", "-.xint4out", "app.xint4recv" },
-            node.SupportFunctions.Select(static function => $"{function.SchemaName ?? "-"}.{function.Name}").ToArray());
+            new[] { "internallength=|4", "input=app.xint4in|", "output=xint4out|", "receive=app.xint4recv|", "alignment=int4|", "passedbyvalue=|", "category=|N", "preferred=|true", "element=My Type|", "internallength=variable|" },
+            node.BaseTypeOptions.Select(static option => $"{option.Name}={string.Join('.', option.NameParts)}|{option.Value}").ToArray());
     }
 
     [TestMethod]

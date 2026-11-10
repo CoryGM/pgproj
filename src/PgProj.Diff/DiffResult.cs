@@ -130,6 +130,27 @@ public sealed record class DiffResult
 
     public IReadOnlyList<SemanticObjectModification<PublicationDefinition>> ModifiedPublications { get; init; } = [];
 
+    /// <summary>G-132.</summary>
+    public IReadOnlyList<ForeignDataWrapperDefinition> AddedForeignDataWrappers { get; init; } = [];
+
+    public IReadOnlyList<ForeignDataWrapperDefinition> RemovedForeignDataWrappers { get; init; } = [];
+
+    public IReadOnlyList<SemanticObjectModification<ForeignDataWrapperDefinition>> ModifiedForeignDataWrappers { get; init; } = [];
+
+    /// <summary>G-132.</summary>
+    public IReadOnlyList<ForeignServerDefinition> AddedForeignServers { get; init; } = [];
+
+    public IReadOnlyList<ForeignServerDefinition> RemovedForeignServers { get; init; } = [];
+
+    public IReadOnlyList<SemanticObjectModification<ForeignServerDefinition>> ModifiedForeignServers { get; init; } = [];
+
+    /// <summary>G-132.</summary>
+    public IReadOnlyList<UserMappingDefinition> AddedUserMappings { get; init; } = [];
+
+    public IReadOnlyList<UserMappingDefinition> RemovedUserMappings { get; init; } = [];
+
+    public IReadOnlyList<SemanticObjectModification<UserMappingDefinition>> ModifiedUserMappings { get; init; } = [];
+
     /// <summary>Owners the project states for objects that have none in the old model (a new object, or one the old model did not read an owner for) (G-146).</summary>
     public IReadOnlyList<OwnerDefinition> AddedOwners { get; init; } = [];
 

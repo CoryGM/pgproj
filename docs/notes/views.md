@@ -60,6 +60,7 @@ compare PostgreSQL's rendering of the two.
 | A column `DEFAULT` | a temporary column of the live column's type | `0::numeric` is stored as `(0)::numeric`, `1.5::numeric` as `1.5` |
 | A generated column's expression | a temporary copy of the live table | implicit casts: `qty * price` over `integer` and `numeric` is stored as `((qty)::numeric * price)` |
 | A partial index's `WHERE` predicate | a temporary copy of the live table | each literal typed by its column: `status <> 'cancelled'` on an enum is stored as `status <> 'cancelled'::my_enum` |
+| An index's expression key | a temporary copy of the live table, one temporary index per expression | each literal typed by what it is compared with: `(c = 'r')` on an enum column is stored as `(c = 'r'::color)` |
 | A `CHECK` constraint's expression | a temporary copy of the live table | typed literals, `IN` lists as `= ANY (ARRAY[...])`, a domain column cast to its base type |
 | A domain's own `CHECK` | the live domain, as a scratch `NOT VALID` constraint | added casts: `length(VALUE)` on a `varchar` domain is stored as `length((VALUE)::text)` |
 

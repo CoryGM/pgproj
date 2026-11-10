@@ -28,8 +28,14 @@ public sealed partial class ScriptGenerator
     /// those that use a routine it drops and recreates (G-105); then, transitively, whatever uses one of those (a view on such a view, a
     /// routine calling such a routine), since PostgreSQL won't drop an object another one uses.
     /// </summary>
-    private static DependentRebuilds FindDependentRebuilds(IEnumerable<ModifiedChange> modifiedChanges, IReadOnlySet<string> droppedRoutines, DependencyGraph graph)
+    private static DependentRebuilds FindDependentRebuilds(
+        IEnumerable<ModifiedChange> modifiedChanges,
+        IReadOnlySet<string> droppedRoutines,
+        DependencyGraph graph,
+        IEnumerable<KeyValuePair<string, IReadOnlySet<string>>>? swappedColumns = null)
     {
+        // The columns an enum type's swap moves (G-191) are retyped as surely as a table alter's, and what uses them is in the way the same.
+        var swapped = swappedColumns?.ToArray() ?? [];
         // A view whose output columns change in a way CREATE OR REPLACE VIEW can't make is itself dropped and recreated (G-104); one whose columns are
         // only renamed, with columns perhaps added after them, is renamed and replaced in place (G-276).
         var reshapedViews = modifiedChanges
@@ -43,12 +49,20 @@ public sealed partial class ScriptGenerator
         }
 
         var changedColumns = new Dictionary<string, IReadOnlySet<string>>(PgProj.Parser.SqlIdentifiers.NameComparer);
+        foreach (var (table, columns) in swapped)
+        {
+            changedColumns[table] = changedColumns.TryGetValue(table, out var already)
+                ? already.Concat(columns).ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer)
+                : columns;
+        }
         foreach (var modified in modifiedChanges)
         {
             if (modified.OldNode is TableDefinition oldTable && modified.NewNode is TableDefinition newTable
                 && ColumnsChangedUnderDependents(oldTable, newTable) is { Count: > 0 } columns)
             {
-                changedColumns[modified.NodeId] = columns;
+                changedColumns[modified.NodeId] = changedColumns.TryGetValue(modified.NodeId, out var swappedHere)
+                    ? swappedHere.Concat(columns).ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer)
+                    : columns;
             }
         }
 
@@ -199,12 +213,22 @@ public sealed partial class ScriptGenerator
     private static Dictionary<string, IReadOnlyList<string>> FindChangedObjectsInUse(IEnumerable<ModifiedChange> modifiedChanges, DependencyGraph graph)
     {
         var inUse = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var change in modifiedChanges.Where(static change => (change.NewNode is CollationDefinition or TextSearchDictionaryDefinition or TextSearchConfigurationDefinition or TypeDefinition { EnumLabels.Count: > 0 } || IsDomainCollationChange(change))
+        foreach (var change in modifiedChanges.Where(static change => (change.NewNode is CollationDefinition or TextSearchDictionaryDefinition or TextSearchConfigurationDefinition or TypeDefinition { EnumLabels.Count: > 0 } or TypeDefinition { IsBaseType: true } or TableDefinition or ForeignServerDefinition || IsDomainCollationChange(change))
                      && IsDropAndRecreateObject(change)))
         {
             // A routine, view, or other object that uses an enum is dropped and created again around it; what cannot be is a table (its columns) or another type.
+            // A base type is rebuilt only when nothing uses it but its own support functions, which it is dropped and created again with, and what is put back on it
+            // (G-267, the user's design of 2026-11-09, item 3: a rebuild under columns would be a later gap).
             var users = graph.GetDependents(change.NodeId)
-                .Where(node => change.NewNode is not TypeDefinition || node.SemanticNode is TableDefinition or ColumnDefinition or TypeDefinition)
+                .Where(node => change.NewNode switch
+                {
+                    TypeDefinition { IsBaseType: true } baseType => !IsOwnSupportFunction(node.SemanticNode, baseType) && node.SemanticNode is not (GrantDefinition or OwnerDefinition),
+                    // A foreign table moved to another server is dropped and created with what is on it (G-133); anything else that uses it refuses the move.
+                    TableDefinition table => !IsCarriedWithForeignTable(node.SemanticNode, table),
+                    // A server dropped and created again (G-132) takes its user mappings with it; a foreign table on it refuses the change (G-133).
+                    ForeignServerDefinition => node.SemanticNode is TableDefinition,
+                    _ => change.NewNode is not TypeDefinition || node.SemanticNode is TableDefinition or ColumnDefinition or TypeDefinition,
+                })
                 .Select(static node => node.NodeId)
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -217,12 +241,28 @@ public sealed partial class ScriptGenerator
         return inUse;
     }
 
+    /// <summary>What a foreign table is dropped and created with when it moves to another server (G-133): its columns and constraints, triggers, statistics, grants, and owner.</summary>
+    internal static bool IsCarriedWithForeignTable(ISemanticNode node, TableDefinition table)
+        => node switch
+        {
+            ColumnDefinition or GrantDefinition or OwnerDefinition => true,
+            ConstraintDefinition constraint => string.Equals(DatabaseModel.CreateKey(constraint.SchemaName, constraint.TableName ?? string.Empty), table.Key, StringComparison.OrdinalIgnoreCase),
+            TriggerDefinition trigger => string.Equals(DatabaseModel.CreateKey(trigger.SchemaName, trigger.TableName ?? string.Empty), table.Key, StringComparison.OrdinalIgnoreCase),
+            StatisticsDefinition => true,
+            _ => false,
+        };
+
+    /// <summary>True when <paramref name="node"/> is one of the functions <paramref name="baseType"/> names (G-267): its input, output, or another support function.</summary>
+    internal static bool IsOwnSupportFunction(ISemanticNode node, TypeDefinition baseType)
+        => node is FunctionDefinition function
+            && baseType.BaseTypeOptions?.Functions.Values.Contains($"{function.SchemaName ?? "public"}.{function.Name}", StringComparer.Ordinal) == true;
+
     /// <summary>A domain whose collation changed (G-196): PostgreSQL has no <c>ALTER DOMAIN ... COLLATE</c>, so it is dropped and created again.</summary>
     private static bool IsDomainCollationChange(ModifiedChange change)
         => change.OldNode is TypeDefinition { DomainBaseType: not null } oldType && change.NewNode is TypeDefinition { DomainBaseType: not null } newType
             && !CollationNames.Same(oldType.DomainCollationName, newType.DomainCollationName);
 
-    private static SqlOperation BlockedChangedObject(ModifiedChange change, IReadOnlyList<string> users)
+    private static SqlOperation BlockedChangedObject(ModifiedChange change, IReadOnlyList<string> users, string? swapRefusal = null)
     {
         var userList = string.Join(", ", users.Take(5)) + (users.Count > 5 ? $" and {users.Count - 5} more" : string.Empty);
         if (IsDomainCollationChange(change))
@@ -236,15 +276,51 @@ public sealed partial class ScriptGenerator
             };
         }
 
-        if (change.NewNode is TypeDefinition)
+        if (change.NewNode is TableDefinition table)
         {
-            // PostgreSQL has no ALTER TYPE ... DROP VALUE and no way to reorder labels; only inserting a label (ADD VALUE) is done in place (G-183).
             return new BlockedOperation
             {
                 NodeId = change.NodeId,
                 NodeKind = change.NodeKind,
-                Message = $"The enum type {change.NodeId} loses or reorders a label, but PostgreSQL cannot do that in place and refuses to drop a type that {userList} use{(users.Count == 1 ? "s" : string.Empty)}. "
-                    + "pgproj does not rebuild what uses it: create the type under a new name, change those columns to it (ALTER COLUMN ... TYPE ... USING column::text::new_type), drop the old type, and rename the new one. Adding a label is done in place.",
+                Message = $"The foreign table {change.NodeId} {(table.IsForeign && change.OldNode is TableDefinition { IsForeign: true } ? "moves to another server" : table.IsForeign ? "becomes a foreign table" : "stops being a foreign table")}, which PostgreSQL cannot do in place, so it would have to be dropped and created again, and {userList} use{(users.Count == 1 ? "s" : string.Empty)} it. "
+                    + "pgproj does not rebuild what uses a foreign table: change those objects first, or make the change by hand.",
+            };
+        }
+
+        if (change.NewNode is ForeignServerDefinition)
+        {
+            return new BlockedOperation
+            {
+                NodeId = change.NodeId,
+                NodeKind = change.NodeKind,
+                Message = $"The server {change.NodeId} changes its wrapper or TYPE, which PostgreSQL cannot do in place, so it would have to be dropped and created again, and the foreign table{(users.Count == 1 ? string.Empty : "s")} {userList} {(users.Count == 1 ? "is" : "are")} on it. Make the change by hand, or move the foreign tables first.",
+            };
+        }
+
+        if (change.NewNode is TypeDefinition { IsBaseType: true })
+        {
+            return new BlockedOperation
+            {
+                NodeId = change.NodeId,
+                NodeKind = change.NodeKind,
+                Message = $"The base type {change.NodeId} changes an option that PostgreSQL cannot change in place (ALTER TYPE ... SET changes only RECEIVE, SEND, TYPMOD_IN, TYPMOD_OUT, ANALYZE, SUBSCRIPT, and STORAGE), "
+                    + $"so it would have to be dropped and created again with its functions, and {userList} use{(users.Count == 1 ? "s" : string.Empty)} it. "
+                    + "pgproj does not rebuild what uses a base type: change those objects first, or make the change by hand.",
+            };
+        }
+
+        if (change.NewNode is TypeDefinition)
+        {
+            // PostgreSQL has no ALTER TYPE ... DROP VALUE and no way to reorder labels; only inserting a label (ADD VALUE) is done in place (G-183). pgproj
+            // rebuilds the type under table columns (G-191); what is refused here is the rest.
+            return new BlockedOperation
+            {
+                NodeId = change.NodeId,
+                NodeKind = change.NodeKind,
+                Message = $"The enum type {change.NodeId} loses or reorders a label, which PostgreSQL cannot do in place, so pgproj rebuilds the type under the columns that use it; "
+                    + $"it cannot here: {swapRefusal ?? $"{userList} use{(users.Count == 1 ? "s" : string.Empty)} it"}. "
+                    + "Change that use first, or make the change by hand: rename the type, create the new one, change the columns to it (ALTER COLUMN ... TYPE ... USING column::text::new_type), and drop the old type. "
+                    + "Adding a label, and renaming one marked -- @renamed-label: old -> new above the CREATE TYPE, are done in place.",
             };
         }
 

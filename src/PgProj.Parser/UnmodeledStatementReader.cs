@@ -55,12 +55,19 @@ internal static class UnmodeledStatementReader
         "CreateDomainStmt",
         "CreateExtensionStmt",
         "TransactionStmt",
+        // Foreign data wrappers, servers, and user mappings (G-132); their ALTER forms are still reported: a project states each one's final form.
+        "CreateFdwStmt",
+        "CreateForeignServerStmt",
+        "CreateUserMappingStmt",
+        // Foreign tables (G-133); IMPORT FOREIGN SCHEMA is still reported: a project states its tables.
+        "CreateForeignTableStmt",
     };
 
     /// <summary>The object kinds a <c>COMMENT ON</c> is read for (<c>PgQueryParser.TryCreateObjectCommentNode</c>).</summary>
     private static readonly HashSet<string> ModeledCommentTargets = new(StringComparer.Ordinal)
     {
         "OBJECT_TABLE",
+        "OBJECT_FOREIGN_TABLE",
         "OBJECT_COLUMN",
         "OBJECT_VIEW",
         "OBJECT_MATVIEW",
@@ -79,6 +86,8 @@ internal static class UnmodeledStatementReader
         "OBJECT_TSDICTIONARY",
         "OBJECT_TSCONFIGURATION",
         "OBJECT_EXTENSION",
+        "OBJECT_FDW",
+        "OBJECT_FOREIGN_SERVER",
     };
 
     /// <summary>Statements that change data or run code: pgproj never runs them, but a pre- or post-deploy script can.</summary>
@@ -102,13 +111,9 @@ internal static class UnmodeledStatementReader
     {
         ["CreateSubscriptionStmt"] = "CREATE SUBSCRIPTION",
         ["AlterSubscriptionStmt"] = "ALTER SUBSCRIPTION",
-        ["CreateFdwStmt"] = "CREATE FOREIGN DATA WRAPPER",
         ["AlterFdwStmt"] = "ALTER FOREIGN DATA WRAPPER",
-        ["CreateForeignServerStmt"] = "CREATE SERVER",
         ["AlterForeignServerStmt"] = "ALTER SERVER",
-        ["CreateUserMappingStmt"] = "CREATE USER MAPPING",
         ["AlterUserMappingStmt"] = "ALTER USER MAPPING",
-        ["CreateForeignTableStmt"] = "CREATE FOREIGN TABLE",
         ["ImportForeignSchemaStmt"] = "IMPORT FOREIGN SCHEMA",
         ["CreateRoleStmt"] = "CREATE ROLE",
         ["AlterRoleStmt"] = "ALTER ROLE",
@@ -206,8 +211,8 @@ internal static class UnmodeledStatementReader
                 // (per action, G-47); for every other kind nothing is, and calling it a table (as G-47's warning did) misleads.
                 var alterObjectKind = String(body, "objtype");
                 // The one thing read for a view, materialized view, or sequence is its owner (G-146), when that is all the statement does.
-                // ALTER INDEX ... ATTACH PARTITION is modeled (G-236), and so is a view column's SET|DROP DEFAULT (G-291).
-                return alterObjectKind is null or "OBJECT_TABLE" || OwnerStatementReader.IsReadOwnerOnlyAlterTable(body) || PgQueryParser.IsAlterIndexAttachPartition(body) || PgQueryParser.IsAlterViewColumnDefault(body)
+                // ALTER INDEX ... ATTACH PARTITION is modeled (G-236), and so is a view column's SET|DROP DEFAULT (G-291). A foreign table's actions are read as a table's (G-133).
+                return alterObjectKind is null or "OBJECT_TABLE" or "OBJECT_FOREIGN_TABLE" || OwnerStatementReader.IsReadOwnerOnlyAlterTable(body) || PgQueryParser.IsAlterIndexAttachPartition(body) || PgQueryParser.IsAlterViewColumnDefault(body)
                     ? null
                     : new Finding($"ALTER {ObjectKind(alterObjectKind)}", Ignored);
             case "AlterTSConfigurationStmt":
@@ -245,16 +250,8 @@ internal static class UnmodeledStatementReader
                     return new Finding("CREATE COLLATION ... FROM", Ignored);
                 }
 
-                // A base type or shell type is not modeled (G-241): it needs C or internal functions and a superuser. The statement is still read, so its
-                // support functions can be left out with it (BaseTypeApplier).
-                if (defineKind == "OBJECT_TYPE")
-                {
-                    return body.TryGetProperty("definition", out var typeDefinition) && typeDefinition.ValueKind == JsonValueKind.Array && typeDefinition.GetArrayLength() > 0
-                        ? new Finding("CREATE TYPE (base type)", "is not modeled (a base type needs C or internal functions and a superuser); the statement and the functions it names are ignored", ReadStatement: true)
-                        : new Finding("CREATE TYPE (shell type)", Ignored, ReadStatement: true);
-                }
-
-                return defineKind is "OBJECT_OPERATOR" or "OBJECT_AGGREGATE" or "OBJECT_COLLATION" or "OBJECT_TSDICTIONARY" or "OBJECT_TSCONFIGURATION" ? null : new Finding($"CREATE {ObjectKind(defineKind)}", Ignored);
+                // A base type is modeled (G-267), and so is its shell when the project defines the type; BaseTypeApplier warns about a shell alone, which needs every file.
+                return defineKind is "OBJECT_TYPE" or "OBJECT_OPERATOR" or "OBJECT_AGGREGATE" or "OBJECT_COLLATION" or "OBJECT_TSDICTIONARY" or "OBJECT_TSCONFIGURATION" ? null : new Finding($"CREATE {ObjectKind(defineKind)}", Ignored);
             case "CommentStmt":
                 var commentTarget = String(body, "objtype");
                 return commentTarget is not null && ModeledCommentTargets.Contains(commentTarget)

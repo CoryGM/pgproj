@@ -42,7 +42,8 @@ public sealed class SearchPathEndToEndTests
             var scriptPath = Path.Combine(directory, "first.sql");
             var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", "--output", scriptPath);
             Assert.AreEqual(0, published.ExitCode, "publish --execute failed.\n" + published.Output);
-            StringAssert.StartsWith(await File.ReadAllTextAsync(scriptPath), "SET search_path TO shop, public;");
+            // G-165: the written script opens its transaction first; the search path is set inside it.
+            StringAssert.StartsWith(await File.ReadAllTextAsync(scriptPath), "BEGIN;\n\nSET search_path TO shop, public;".ReplaceLineEndings());
 
             Assert.AreEqual(
                 "public.region|public.region_name_idx|shop.customer|shop.customer_totals|shop.orders|shop.orders_customer_idx",

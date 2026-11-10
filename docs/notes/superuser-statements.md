@@ -5,7 +5,9 @@ PostgreSQL lets only a superuser run some of the statements pgproj deploys:
 - any statement on an **event trigger**: creating, changing, or dropping one, and its owner, which must be a superuser ([event triggers](event-triggers.md));
 - `ALTER TABLE t { ENABLE | DISABLE } TRIGGER ALL`, which also changes the **internal triggers** that enforce the table's foreign keys ([`ALTER TABLE` in project SQL](alter-table.md)); `TRIGGER USER` and a named trigger do not need a superuser;
 - a function or procedure created or replaced **`LEAKPROOF`** ([routine options](routine-options.md));
-- a function or procedure created or replaced in an **untrusted language**: `c`, `internal`, or a language the server marks untrusted (`plpython3u`, `plperlu`, ...; `pg_language.lanpltrusted`).
+- a function or procedure created or replaced in an **untrusted language**: `c`, `internal`, or a language the server marks untrusted (`plpython3u`, `plperlu`, ...; `pg_language.lanpltrusted`);
+- a **foreign data wrapper** created, changed, or dropped, and its owner, which must be a superuser ([foreign data](foreign-data.md));
+- a **base type** or its shell created, and its options changed with `ALTER TYPE ... SET`, even by its owner ([base types](base-types.md)).
 
 A role that is not a superuser used to fail partway through the script, which rolled back. Now:
 
@@ -23,7 +25,7 @@ A role that is not a superuser used to fail partway through the script, which ro
 - **Only the statements in this script count.** A project with an event trigger that is already deployed and unchanged publishes without the option.
 - There is no `pgproj.json` setting for it, and `diff` does not mention it.
 
-What pgproj does not model yet and would also need a superuser (base types, foreign data wrappers) will join this list when it is modeled.
+What pgproj does not model yet and would also need a superuser will join this list when it is modeled.
 
 ---
 

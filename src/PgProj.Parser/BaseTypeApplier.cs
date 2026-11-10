@@ -1,13 +1,11 @@
 namespace PgProj.Parser;
 
 /// <summary>
-/// Leaves a base type's support functions out of the project with the type (G-241). A base type, <c>CREATE TYPE name (INPUT = ..., OUTPUT = ...)</c>, is not modeled
-/// (<see cref="UnmodeledStatementReader"/> reports it), and the functions it names exist only to define it: they are C or internal functions, a non-superuser cannot
-/// create them, and without the type they are useless. The live read leaves them out the same way, so a project that keeps them would never converge. Runs over every
-/// tree before any semantic pass, like <see cref="AlterPublicationApplier"/>, because the type and its functions may be in different files. A function the type names is
-/// matched by name in the schema written; an unqualified one in the type's own schema, or, failing that, in any schema where exactly one function has the name. The
-/// owner, comment, and grants of a function left out, and of the type itself, are left out too. One warning per base type names what was left out. The result contains
-/// none of the marker nodes.
+/// Takes a project's shell types out before the semantic passes (G-267). A shell, <c>CREATE TYPE name;</c>, is how <c>pg_dump</c> lets a base type's input and output
+/// functions name the type before it is defined, and with its definition, <c>CREATE TYPE name (INPUT = ..., OUTPUT = ...)</c>, in any file of the project, it is one
+/// type, not a duplicate: <c>publish</c> writes the shell itself where it needs one. A shell the project never defines is not modeled, and is a warning. Runs over every
+/// tree before any semantic pass, like <see cref="AlterPublicationApplier"/>, because the shell and the definition may be in different files. Before G-267 a base type
+/// was not modeled at all (G-241), and this class left it and the functions it names out of the project. The result contains none of the marker nodes.
 /// </summary>
 public static class BaseTypeApplier
 {
@@ -23,114 +21,27 @@ public static class BaseTypeApplier
             return trees;
         }
 
-        var functionSchemasByName = new Dictionary<string, HashSet<string>>(SqlIdentifiers.NameComparer);
-        foreach (var function in trees.SelectMany(static tree => tree.Nodes).OfType<FunctionNode>())
-        {
-            if (function.Name is { } name && function.SchemaName is { } schema)
-            {
-                if (!functionSchemasByName.TryGetValue(name, out var schemas))
-                {
-                    functionSchemasByName[name] = schemas = new HashSet<string>(SqlIdentifiers.NameComparer);
-                }
-
-                schemas.Add(schema);
-            }
-        }
-
-        // The types (shell or base) and the functions that go with them, as (schema, name).
-        var types = new HashSet<(string Schema, string Name)>();
-        var functions = new HashSet<(string Schema, string Name)>();
-        var diagnosticsByTree = trees.Select(static tree => tree.Diagnostics.ToList()).ToList();
-        for (var treeIndex = 0; treeIndex < trees.Count; treeIndex++)
-        {
-            foreach (var baseType in trees[treeIndex].Nodes.OfType<BaseTypeNode>())
-            {
-                if (baseType.Name is null || baseType.SchemaName is null)
-                {
-                    continue;
-                }
-
-                types.Add(Key(baseType.SchemaName, baseType.Name));
-                var leftOut = new List<string>();
-                foreach (var support in baseType.SupportFunctions)
-                {
-                    if (Resolve(support, baseType.SchemaName, functionSchemasByName) is { } schema && functions.Add(Key(schema, support.Name)))
-                    {
-                        leftOut.Add($"{schema}.{support.Name}");
-                    }
-                }
-
-                if (leftOut.Count > 0)
-                {
-                    diagnosticsByTree[treeIndex].Add(new SqlDiagnostic(
-                        SqlDiagnosticSeverity.Warning,
-                        $"Base type {baseType.SchemaName}.{baseType.Name} is not modeled, so the functions it names are left out with it: {string.Join(", ", leftOut)}.",
-                        DiagnosticSource));
-                }
-            }
-        }
+        var defined = trees
+            .SelectMany(static tree => tree.Types)
+            .Where(static type => type.Form == "base" && type.Name is not null && type.SchemaName is not null)
+            .Select(static type => (type.SchemaName!, type.Name!))
+            .ToHashSet();
 
         var result = new List<SqlSyntaxTree>(trees.Count);
-        for (var treeIndex = 0; treeIndex < trees.Count; treeIndex++)
+        foreach (var tree in trees)
         {
-            var nodes = new List<SqlNode>();
-            foreach (var node in trees[treeIndex].Nodes)
+            var diagnostics = tree.Diagnostics.ToList();
+            foreach (var shell in tree.Nodes.OfType<BaseTypeNode>().Where(shell => shell.Name is not null && shell.SchemaName is not null && !defined.Contains((shell.SchemaName, shell.Name))))
             {
-                if (Keep(node, types, functions) is { } kept)
-                {
-                    nodes.Add(kept);
-                }
+                diagnostics.Add(new SqlDiagnostic(
+                    SqlDiagnosticSeverity.Warning,
+                    $"CREATE TYPE (shell type) {shell.SchemaName}.{shell.Name} is not modeled and is ignored: the project has no definition for it (CREATE TYPE {shell.SchemaName}.{shell.Name} (INPUT = ..., OUTPUT = ...)).",
+                    DiagnosticSource));
             }
 
-            result.Add(trees[treeIndex] with { Nodes = nodes, Diagnostics = diagnosticsByTree[treeIndex] });
+            result.Add(tree with { Nodes = tree.Nodes.Where(static node => node is not BaseTypeNode).ToList(), Diagnostics = diagnostics });
         }
 
         return result;
     }
-
-    /// <summary>The node as it stays in the project, or null when it belongs to a base type that is left out.</summary>
-    private static SqlNode? Keep(SqlNode node, HashSet<(string Schema, string Name)> types, HashSet<(string Schema, string Name)> functions)
-    {
-        bool IsFunction(string? schema, string? name) => schema is not null && name is not null && functions.Contains(Key(schema, name));
-        bool IsType(string? schema, string? name) => schema is not null && name is not null && types.Contains(Key(schema, name));
-
-        switch (node)
-        {
-            case BaseTypeNode:
-                return null;
-            case FunctionNode function when IsFunction(function.SchemaName, function.Name):
-                return null;
-            case OwnerNode { ObjectKind: "Function" } owner when IsFunction(owner.SchemaName, owner.ObjectName):
-                return null;
-            case OwnerNode { ObjectKind: "Type" } owner when IsType(owner.SchemaName, owner.ObjectName):
-                return null;
-            case ObjectCommentNode { ObjectKind: "Function" } comment when IsFunction(comment.SchemaName, comment.TableName):
-                return null;
-            case ObjectCommentNode { ObjectKind: "Type" } comment when IsType(comment.SchemaName, comment.TableName):
-                return null;
-            case GrantNode { ObjectKind: "function" } grant when grant.Targets.Any(target => IsFunction(target.SchemaName, target.Name)):
-                var targets = grant.Targets.Where(target => !IsFunction(target.SchemaName, target.Name)).ToArray();
-                return targets.Length == 0 ? null : grant with { Targets = targets };
-            default:
-                return node;
-        }
-    }
-
-    /// <summary>The schema of the project function a type's definition names, or null when the project declares none of that name.</summary>
-    private static string? Resolve(BaseTypeSupportFunction support, string typeSchema, Dictionary<string, HashSet<string>> functionSchemasByName)
-    {
-        if (!functionSchemasByName.TryGetValue(support.Name, out var schemas))
-        {
-            return null;
-        }
-
-        if (support.SchemaName is { } written)
-        {
-            return schemas.Contains(written) ? written : null;
-        }
-
-        return schemas.Contains(typeSchema) ? typeSchema : schemas.Count == 1 ? schemas.Single() : null;
-    }
-
-    private static (string Schema, string Name) Key(string schema, string name) => (schema, name);
 }

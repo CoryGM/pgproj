@@ -8,7 +8,8 @@ This guide explains how to set up a development environment, understand the arch
 
 You will need:
 
-- .NET 10 SDK or later  
+- .NET 10 SDK 10.0.404 or a later 10.0 SDK. `global.json` pins it: the newest .NET 10 SDK installed is used (`rollForward: latestFeature`), never a later major version, even
+  where one is installed, as on a machine or CI runner that has .NET 11.  
 - PostgreSQL 14, 15, 16, 17, or 18 (local or remote). These are the versions the Docker suite is run against (G-120, G-269). The parser is
   libpg_query with PostgreSQL 18's grammar (NuGet `Npgquery`, native library only), which parses every version's SQL. The PostgreSQL 18
   schema features (`NOT ENFORCED`, temporal keys, `VIRTUAL` columns, `NOT NULL ... NOT VALID`; G-121) are supported, and a project that
@@ -326,7 +327,10 @@ dotnet tool install --global wix --version 5.0.2
 packaging/windows/build-packages.ps1 -Rid win-x64 -Version 0.1.0 -Output dist   # .zip and .msi
 ```
 
-Build the Linux packages on Linux (a Windows file system loses the executable bit that the `.tar.gz` needs).
+Build the Linux packages on Linux (a Windows file system loses the executable bit that the `.tar.gz` needs). They carry the .NET runtime of the SDK
+that builds them, which must be a .NET 10 runtime with OpenSSL 4 support (expected in 10.0.15) to load OpenSSL 4 (Fedora 45, Ubuntu 26.10):
+`verify-packages.sh` checks the archive with only OpenSSL 4 and the `.rpm` on the newest Fedora, and both fail on a runtime without it with
+`No usable version of libssl was found` (G-334).
 
 **Signing.**
 

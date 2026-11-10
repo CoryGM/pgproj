@@ -34,7 +34,8 @@ internal sealed class DeepTypeStructurePass
                 {
                     "composite" => MapCompositeType(typeDefinition, typeNode, diagnostics) with { IsComposite = true },
                     "range" => WithComparableSubtype(MapRangeType(typeDefinition, typeNode.RangeOptions ?? []), typeNode.RangeSubtype),
-                    "enum" => typeDefinition with { CompositeFields = [], RangeOptions = null, EnumLabels = typeNode.EnumLabels, IsEnum = true },
+                    "enum" => typeDefinition with { CompositeFields = [], RangeOptions = null, EnumLabels = typeNode.EnumLabels, EnumLabelRenames = typeNode.EnumLabelRenames, IsEnum = true },
+                    "base" => MapBaseType(model, typeDefinition, typeNode),
                     _ => typeDefinition,
                 };
 
@@ -111,6 +112,127 @@ internal sealed class DeepTypeStructurePass
             ReferencedOperators = OperatorReferences.Merge([], referencedOperators),
         };
     }
+
+    /// <summary>
+    /// A base type's options (G-267, the user's design of 2026-11-09, item 5) in their comparison form (<see cref="BaseTypeOptionsDefinition"/>): every option, PostgreSQL's
+    /// default filled in for one not stated, a function named <c>schema.name</c>. An unqualified function is the project's of that name in the type's schema, then in the
+    /// project's search path, as PostgreSQL resolves it when the statement runs; one the project does not declare is PostgreSQL's own (<c>pg_catalog</c>). The functions
+    /// are what the type is created after, and <c>ELEMENT</c> and <c>LIKE</c> the types. What is deployed is the statement as written.
+    /// </summary>
+    private static TypeDefinition MapBaseType(DatabaseModel model, TypeDefinition typeDefinition, PgProj.Parser.TypeNode typeNode)
+    {
+        var functions = new Dictionary<string, string>(StringComparer.Ordinal);
+        var writtenFunctions = new Dictionary<string, string>(StringComparer.Ordinal);
+        var stated = new HashSet<string>(StringComparer.Ordinal);
+        var referencedTypes = new HashSet<string>(typeDefinition.ReferencedTypes, PgProj.Parser.SqlIdentifiers.NameComparer);
+        var options = new BaseTypeOptionsDefinition();
+
+        foreach (var option in typeNode.BaseTypeOptions)
+        {
+            var name = option.Name.ToUpperInvariant();
+            stated.Add(name);
+            var parts = option.NameParts;
+            var last = parts.Count > 0 ? parts[^1] : null;
+            switch (name)
+            {
+                case var _ when BaseTypeOptionsDefinition.FunctionOptions.Contains(name) && parts.Count > 0:
+                    functions[name] = ResolveBaseTypeFunction(model, typeDefinition.SchemaName, parts);
+                    writtenFunctions[name] = string.Join('.', parts.Select(PgProj.Parser.SqlIdentifiers.QuotePlain));
+                    break;
+                case "INTERNALLENGTH":
+                    options = options with
+                    {
+                        InternalLength = string.Equals(last, "variable", StringComparison.OrdinalIgnoreCase) ? -1
+                            : int.TryParse(option.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var length) ? length : -1,
+                    };
+                    break;
+                case "PASSEDBYVALUE":
+                    options = options with { PassedByValue = ReadBoolean(option.Value) };
+                    break;
+                case "ALIGNMENT":
+                    options = options with { Alignment = last?.ToLowerInvariant() switch { "char" => "c", "int2" => "s", "double" => "d", _ => "i" } };
+                    break;
+                case "STORAGE":
+                    options = options with { Storage = last?.ToLowerInvariant() switch { "external" => "e", "main" => "m", "extended" => "x", _ => "p" } };
+                    break;
+                case "LIKE" when parts.Count > 0:
+                    options = options with { Like = ComparableBaseTypeReference(parts), WrittenLike = string.Join('.', parts.Select(PgProj.Parser.SqlIdentifiers.QuotePlain)) };
+                    referencedTypes.Add(NormalizeTypeReference(string.Join('.', parts)));
+                    break;
+                case "CATEGORY" when option.Value is { Length: > 0 }:
+                    options = options with { Category = option.Value[..1] };
+                    break;
+                case "PREFERRED":
+                    options = options with { Preferred = ReadBoolean(option.Value) };
+                    break;
+                case "DEFAULT":
+                    options = options with { Default = option.Value };
+                    break;
+                case "ELEMENT" when parts.Count > 0:
+                    options = options with { Element = ComparableBaseTypeReference(parts) };
+                    referencedTypes.Add(NormalizeTypeReference(string.Join('.', parts)));
+                    break;
+                case "DELIMITER" when option.Value is { Length: > 0 }:
+                    options = options with { Delimiter = option.Value[..1] };
+                    break;
+                case "COLLATABLE":
+                    options = options with { Collatable = ReadBoolean(option.Value) };
+                    break;
+            }
+        }
+
+        // ELEMENT without SUBSCRIPT gets PostgreSQL's handler for a fixed-length array of the element (checked on 14 and 18).
+        if (options.Element is not null && !functions.ContainsKey("SUBSCRIPT"))
+        {
+            functions["SUBSCRIPT"] = "pg_catalog.raw_array_subscript_handler";
+        }
+
+        // LIKE gives the four options it copies only where the definition does not state them; the server says what they are.
+        if (options.Like is not null)
+        {
+            options = options with
+            {
+                InternalLength = stated.Contains("INTERNALLENGTH") ? options.InternalLength : null,
+                PassedByValue = stated.Contains("PASSEDBYVALUE") ? options.PassedByValue : null,
+                Alignment = stated.Contains("ALIGNMENT") ? options.Alignment : null,
+                Storage = stated.Contains("STORAGE") ? options.Storage : null,
+            };
+        }
+
+        var referencedFunctions = new HashSet<string>(typeDefinition.ReferencedFunctions, PgProj.Parser.SqlIdentifiers.NameComparer);
+        referencedFunctions.UnionWith(functions.Values.Where(static function => !function.StartsWith("pg_catalog.", StringComparison.Ordinal)));
+
+        return typeDefinition with
+        {
+            BaseTypeOptions = options with { Functions = functions, WrittenFunctions = writtenFunctions, Stated = stated },
+            BaseTypeWrittenText = typeNode.RawStatementSql.Trim().TrimEnd(';').TrimEnd(),
+            ReferencedTypes = referencedTypes.Where(static type => !string.IsNullOrWhiteSpace(type)).ToArray(),
+            ReferencedFunctions = referencedFunctions.ToArray(),
+        };
+    }
+
+    /// <summary>A function a base type names, as <c>schema.name</c>: as written when qualified, else the project's in the type's schema, then on its search path, else PostgreSQL's.</summary>
+    internal static string ResolveBaseTypeFunction(DatabaseModel model, string? typeSchema, IReadOnlyList<string> parts)
+    {
+        if (parts.Count > 1)
+        {
+            return $"{parts[^2]}.{parts[^1]}";
+        }
+
+        var name = parts[^1];
+        var schemas = model.Functions.Values.Where(function => string.Equals(function.Name, name, StringComparison.Ordinal)).Select(static function => function.SchemaName).ToHashSet(StringComparer.Ordinal);
+        var schema = typeSchema is not null && schemas.Contains(typeSchema) ? typeSchema
+            : model.SearchPath.FirstOrDefault(schemas.Contains) ?? "pg_catalog";
+        return $"{schema}.{name}";
+    }
+
+    /// <summary>A type a base type names (<c>ELEMENT</c>, <c>LIKE</c>), by the signature a column's type is compared by, so <c>int4</c>, <c>integer</c>, and <c>pg_catalog.int4</c> are one.</summary>
+    internal static string ComparableBaseTypeReference(IReadOnlyList<string> parts)
+        => ColumnTypeNormalizer.BuildComparableTypeSignature(string.Join('.', parts), [], 0, intervalFields: null);
+
+    /// <summary>A boolean option as PostgreSQL reads it: written without a value is true.</summary>
+    private static bool ReadBoolean(string? value)
+        => value is null || value.ToLowerInvariant() is "true" or "t" or "on" or "yes" or "y" or "1";
 
     /// <summary>
     /// Gives every CHECK constraint declared without a name the default name PostgreSQL assigns (confirmed against

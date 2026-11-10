@@ -11,13 +11,17 @@ The same idea over real projects' schemas (GitLab, Synapse, MusicBrainz, and oth
 
 ## Run it
 
-You need Docker, `gh`, Python 3, Git Bash or another POSIX shell, and a built CLI (`dotnet build src/PgProj.Cli`). The harness runs the `pgproj` command, and
-every command runs through the engine (`PgProj.Engine`), so a defect it finds is in the engine or the projects below it unless only the printed text is wrong.
+You need Docker, the .NET SDK, `gh`, Python 3, and Git Bash or another POSIX shell. The harness runs the `pgproj` command, and every command runs through
+the engine (`PgProj.Engine`), so a defect it finds is in the engine or the projects below it unless only the printed text is wrong.
 
-1. **Start a container per version** under test. The default port is `55480 + version`; never use 55432.
+No server publishes a host port. Each version's server (`diffqa<version>`) and pgproj share a Docker network of their own (`diffqa`): pgproj is a
+self-contained `linux-x64` build of this checkout (`work/pgproj-linux`), run in a container (`mcr.microsoft.com/dotnet/runtime-deps:10.0`) with `work` mounted
+at `/work`, and reaches the server by its container name. `psql` and `pg_dump` run in the server's container.
+
+1. **Make the network, a server per version under test, and the build** (the build is made once and shared; `setup.sh build` makes it again after a change):
 
    ```sh
-   docker run -d --name diffqa18 -e POSTGRES_PASSWORD=qa -p 55498:5432 postgres:18-alpine
+   DIFFQA_VERSION=18 tools/diffqa/setup.sh
    ```
 
 2. **Fetch that version's regression SQL** into `tools/diffqa/regress/<branch>`:
@@ -39,13 +43,15 @@ every command runs through the engine (`PgProj.Engine`), so a defect it finds is
    - what each path lost, by kind of statement;
    - the not-modeled warnings, by message.
 
+4. **Remove the server** when done (the network goes with the last one): `DIFFQA_VERSION=18 tools/diffqa/setup.sh down`.
+
 Each run directory holds:
 - `input.sql`, `psql.out`;
 - the dumps, raw (`a_raw.sql`, `b_raw.sql`, `c_raw.sql`) and normalized (`.norm`);
 - `written.diff` and `init.diff`;
 - the output of each pgproj command.
 
-Settings, overridable from the environment, are in `config.sh`: version, container, port, password, branch, timeout, and the path to the CLI.
+Settings, overridable from the environment, are in `config.sh`: version, container, network, password, branch, timeout, the Linux build's folder, and the image it runs in.
 
 ## Reading the results
 

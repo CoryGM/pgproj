@@ -44,6 +44,14 @@ public sealed record GrantDefinition(
     /// <summary>The <c>FOR ROLE</c> of <c>ALTER DEFAULT PRIVILEGES</c>; null when the statement names none.</summary>
     public string? ForRole { get; init; }
 
+    /// <summary>
+    /// True for <c>REVOKE USAGE|ALL ON TYPE|DOMAIN t FROM PUBLIC</c> (G-337, option (B)): the type does not have PostgreSQL's default, <c>USAGE</c> for
+    /// <c>PUBLIC</c>, which every new type and domain is given. It is the one <c>REVOKE</c> pgproj reads; a type without one is compared as having the
+    /// default. Its <see cref="Grantee"/> is <c>PUBLIC</c>; it stands for no <see cref="GrantAtom"/> and is compared by its key. Deployed as that
+    /// <c>REVOKE</c>, and undone by <c>GRANT ... TO PUBLIC</c>.
+    /// </summary>
+    public bool RevokesDefault { get; init; }
+
     private readonly PgProj.Parser.PlaceSlot<SemanticLocation> _location = PgProj.Parser.PlaceSlot<SemanticLocation>.Empty;
 
     /// <summary>

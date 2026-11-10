@@ -49,6 +49,11 @@ public sealed partial class PgProjEngine
             return Stopped(state, PublishStatus.Refused, CompareStatus.Refused, problem);
         }
 
+        if (PublishTexts.VariablesProblem(request.Variables ?? new Dictionary<string, string>()) is { } variablesProblem)
+        {
+            return Stopped(state, PublishStatus.Refused, CompareStatus.Refused, variablesProblem);
+        }
+
         try
         {
             return await RunPublishAsync(request, state, cancellationToken);
@@ -128,6 +133,12 @@ public sealed partial class PgProjEngine
         var project = snapshot.Project;
         var model = built.Model;
 
+        // The direction first, before the source's diagnostics (G-349), the target named by its connection string.
+        if (source is not null)
+        {
+            Say(progress, EngineEventKind.Direction, SourceProject.Direction(source.Source, SourceProject.EndOf(source.TargetConnectionString)));
+        }
+
         if (request.AfterBuild is { } afterBuild)
         {
             await afterBuild(EngineMasking.Build(state.ToBuildResult()), cancellationToken);
@@ -166,7 +177,6 @@ public sealed partial class PgProjEngine
             await source.EnsureNotTheTargetAsync(connection, cancellationToken);
             sourceEnd = source.Source;
             targetEnd = SourceProject.EndOf(connection);
-            Say(progress, EngineEventKind.Direction, SourceProject.Direction(sourceEnd, targetEnd));
         }
 
         await LiveComparison.ApplySearchPathAsync(connection, project, cancellationToken);
@@ -205,11 +215,12 @@ public sealed partial class PgProjEngine
             serverMajor,
             concurrently ? await PublishTexts.ReadRelationNamesAsync(connection, cancellationToken) : null,
             commentsOnly ? [] : await SuperuserStatements.ReadUntrustedLanguagesAsync(connection, cancellationToken),
-            progress);
+            progress,
+            commentsOnly ? null : request.ApplySecrets);
 
         // What a printed or written script needs to bound its waits the same way (G-270); --execute sets it for its own transaction.
         var written = lockTimeout is null ? unit.Script : $"SET lock_timeout = '{lockTimeout}';{Environment.NewLine}{Environment.NewLine}{unit.Script}";
-        var hasStatements = SqlStatementSplitter.Split(unit.Script).Count > 0;
+        var hasStatements = unit.HasStatements;
         var warnings = new List<PublishNotice>();
         var refusals = new List<PublishNotice>();
 
@@ -218,6 +229,13 @@ public sealed partial class PgProjEngine
         if (lockWarnings.Count > 0)
         {
             Warn(warnings, progress, new PublishNotice(PublishNoticeKind.LockRewrite, LockWarnings.Describe(lockWarnings), PublishItems.LockRewrites(lockWarnings)));
+        }
+
+        // A privilege given to PUBLIC that it does not have now, which --allow-destructive does not cover (G-337, G-338).
+        var publicGrants = commentsOnly ? [] : PublicGrants.Find(unit.Transactional, liveModel);
+        if (publicGrants.Count > 0)
+        {
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.PublicGrant, PublicGrants.Describe(publicGrants), [.. publicGrants.Select(static grant => new PublishItem(PublishNoticeKind.PublicGrant, grant.Statement, PgProj.Diff.ChangeNodeKind.Grant))]));
         }
 
         // A drop, rename, or retype of something a PL/pgSQL body names: PostgreSQL will not stop it and the routine fails when it runs (G-303b).
@@ -231,15 +249,15 @@ public sealed partial class PgProjEngine
             EngineEventKind.Compared,
             null,
             0,
-            $"Compared the project with the live database: {changeSet.Added.Count} added, {changeSet.Removed.Count} removed, {changeSet.Modified.Count} modified; {SqlStatementSplitter.Split(unit.Script).Count} statement(s) in the script."));
+            $"Compared the project with the live database: {changeSet.Added.Count} added, {changeSet.Removed.Count} removed, {changeSet.Modified.Count} modified; {unit.StatementCount} statement(s) in the script."));
 
         progress?.Report(new EngineEvent(EngineEventKind.ScriptPlanned, Script: written));
 
-        // The script pgproj writes or prints is a bare sequence of statements; only --execute runs it in a transaction (G-165, deferred by the user). A shell that
-        // runs the script and does not keep it leaves this out.
-        if (hasStatements)
+        // The script pgproj writes or prints carries its own transaction (G-165); only its --concurrently part runs outside one, which a kept script is warned
+        // about. A shell that runs the script and does not keep it leaves this out.
+        if (unit.AfterCommit.Count > 0)
         {
-            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.NotTransactional, unit.AfterCommit.Count == 0 ? PublishTexts.ScriptNotTransactionalWarning : PublishTexts.ConcurrentScriptWarning, [], ForKeptScript: true));
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.NotTransactional, PublishTexts.ConcurrentScriptWarning, [], ForKeptScript: true));
         }
 
         // pgproj never drops a schema (G-166, the user's decision); it says which ones it is leaving behind.
@@ -293,6 +311,22 @@ public sealed partial class PgProjEngine
                 superuserItems));
         }
 
+        // The scripts' variables (G-336): a kept script keeps them, and --execute needs a value for each.
+        var variables = request.Variables ?? new Dictionary<string, string>();
+        var variablesUsed = PublishTexts.VariablesUsed([unit.TransactionalScript]);
+        var variablesMissing = variablesUsed.Where(name => !variables.ContainsKey(name)).ToArray();
+        if (variablesUsed.Count > 0 && !executing)
+        {
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesKept(variablesUsed), [], ForKeptScript: true));
+        }
+
+        // --apply-secrets names no user mapping uses (G-347): a typo would send nothing and the run report success.
+        var unknownSecrets = commentsOnly ? [] : PublishTexts.UnknownSecrets(request.ApplySecrets, model);
+        if (unknownSecrets.Count > 0 && !executing)
+        {
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeUnknownSecrets(unknownSecrets, PublishTexts.SecretVariables(model), executing: false), []));
+        }
+
         if (executing)
         {
             await RefuseAsync();
@@ -340,7 +374,7 @@ public sealed partial class PgProjEngine
 
         try
         {
-            await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, cancellationToken);
+            await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, variables, cancellationToken);
             Say(progress, EngineEventKind.ScriptExecuted, "Executed deployment script.");
             if (unit.AfterCommit.Count > 0)
             {
@@ -381,6 +415,17 @@ public sealed partial class PgProjEngine
             if (missingRoles.Count > 0)
             {
                 refusals.Add(new PublishNotice(PublishNoticeKind.MissingRole, $"Publish failed: {PublishTexts.DescribeMissingRoles(missingRoles, executing: true)}", PublishItems.Roles(PublishNoticeKind.MissingRole, missingRoles)));
+            }
+
+            // What the run cannot fill in (G-336), reported with what the server lacks.
+            if (variablesMissing.Length > 0)
+            {
+                refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesMissing(variablesMissing), []));
+            }
+
+            if (unknownSecrets.Count > 0)
+            {
+                refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeUnknownSecrets(unknownSecrets, PublishTexts.SecretVariables(model), executing: true), []));
             }
 
             if (refusals.Count > 0)

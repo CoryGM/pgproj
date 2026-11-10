@@ -26,7 +26,10 @@ public sealed partial class PgQueryParser
     public SqlSyntaxTree Parse(string sql)
     {
         ArgumentNullException.ThrowIfNull(sql);
-        return LargeStack.Run(() => ParseOnLargeStack(sql));
+
+        // A variable, :'name', parses as a literal that keeps its name (G-132); only a foreign server's or user mapping's option value may be one.
+        var marked = ScriptVariables.MarkSlots(sql);
+        return LargeStack.Run(() => ParseOnLargeStack(marked));
     }
 
     private SqlSyntaxTree ParseOnLargeStack(string sql)
@@ -264,6 +267,7 @@ public sealed partial class PgQueryParser
                     if (TryGetDirectProperty(statement, "stmt", out var modeledBody))
                     {
                         ReportUnreadClauses(sql, statement, modeledBody, diagnostics);
+                        ReportMisplacedVariables(sql, statement, modeledBody, diagnostics);
                     }
 
                     var statementSql = GetStatementSql(sql, statement);
@@ -495,6 +499,17 @@ public sealed partial class PgQueryParser
                             }
 
                             break;
+                        case "CreateForeignTableStmt":
+                            // A foreign table (G-133): a table with a server and options, read as one, its columns as a table's.
+                            if (TryCreateForeignTableNode(property.Value, statementSql, statementOffset, out var foreignBase) is { } foreignTable)
+                            {
+                                nodes.Add(foreignTable);
+                                var firstForeignChild = nodes.Count;
+                                VisitElement(foreignBase, nodes, foreignTable.Name, foreignTable.SchemaName, currentColumnName: null, statementSql, statementOffset);
+                                MarkCreateTableConstraints(nodes, firstForeignChild, isPartitionOfList: foreignTable.PartitionElementsText is not null);
+                            }
+
+                            continue;
                         case "AlterTableStmt":
                             if (TryGetRelationIdentity(property.Value, "relation", out var alterTableName, out var alterSchemaName))
                             {
@@ -711,13 +726,23 @@ public sealed partial class PgQueryParser
                             // below would visit them too and misread a composite type's fields as table columns.
                             continue;
                         case "CreateEnumStmt":
-                            AddIfNotNull(nodes, TypeStatementReader.ReadEnumType(property.Value, statementSql));
+                            // The comment lines just above the statement, where a -- @renamed-label annotation goes (G-191): pg_query starts a statement at its first word.
+                            AddIfNotNull(nodes, TypeStatementReader.ReadEnumType(property.Value, statementSql, s_context is { } enumContext ? TypeStatementReader.CommentLinesBefore(enumContext.Sql, enumContext.StatementOffset) : string.Empty));
                             break;
                         case "CreateRangeStmt":
                             AddIfNotNull(nodes, TypeStatementReader.ReadRangeType(property.Value, statementSql));
                             break;
+                        case "CreateFdwStmt":
+                            AddIfNotNull(nodes, TryCreateForeignDataWrapperNode(property.Value));
+                            continue;
+                        case "CreateForeignServerStmt":
+                            AddIfNotNull(nodes, TryCreateForeignServerNode(property.Value));
+                            continue;
+                        case "CreateUserMappingStmt":
+                            AddIfNotNull(nodes, TryCreateUserMappingNode(property.Value));
+                            continue;
                         case "DefineStmt":
-                            AddIfNotNull(nodes, TypeStatementReader.ReadBaseType(property.Value));
+                            AddIfNotNull(nodes, TypeStatementReader.ReadBaseType(property.Value, statementSql));
                             if (string.Equals(TryGetDirectStringProperty(property.Value, "kind"), "OBJECT_OPERATOR", StringComparison.Ordinal)
                                 && TryCreateOperatorNode(property.Value) is { } operatorNode)
                             {

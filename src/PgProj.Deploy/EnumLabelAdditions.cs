@@ -8,6 +8,41 @@ namespace PgProj.Deploy;
 internal static class EnumLabelAdditions
 {
     /// <summary>
+    /// The database's labels with the project's <c>@renamed-label</c> annotations applied (G-191), in order, and the renames that do something: one whose old
+    /// label the database has and whose new one it does not yet (one already applied names a label the database no longer has, and is nothing to do).
+    /// </summary>
+    internal static (IReadOnlyList<string> Labels, IReadOnlyList<PgProj.Parser.EnumLabelRename> Renames) ApplyRenames(IReadOnlyList<string> oldLabels, IReadOnlyList<PgProj.Parser.EnumLabelRename> renames)
+    {
+        var labels = oldLabels.ToList();
+        var applied = new List<PgProj.Parser.EnumLabelRename>();
+        foreach (var rename in renames)
+        {
+            var index = labels.FindIndex(label => string.Equals(label, rename.From, StringComparison.Ordinal));
+            if (index >= 0 && !labels.Contains(rename.To, StringComparer.Ordinal))
+            {
+                labels[index] = rename.To;
+                applied.Add(rename);
+            }
+        }
+
+        return (labels, applied);
+    }
+
+    /// <summary>
+    /// True when <paramref name="newLabels"/> is reached in place (G-183, G-191): the renames applied (<c>RENAME VALUE</c>), then labels only inserted
+    /// (<c>ADD VALUE</c>); at least one of the two does something.
+    /// </summary>
+    internal static bool IsInPlace(IReadOnlyList<string> oldLabels, IReadOnlyList<string> newLabels, IReadOnlyList<PgProj.Parser.EnumLabelRename> renames)
+    {
+        var (renamed, applied) = ApplyRenames(oldLabels, renames);
+        return renamed.SequenceEqual(newLabels, StringComparer.Ordinal) ? applied.Count > 0 : Plan(renamed, newLabels) is not null;
+    }
+
+    /// <summary>The database's labels (after the renames) that the project's type does not have: what a swap cannot keep (G-191).</summary>
+    internal static IReadOnlyList<string> Removed(IReadOnlyList<string> oldLabels, IReadOnlyList<string> newLabels, IReadOnlyList<PgProj.Parser.EnumLabelRename> renames)
+        => ApplyRenames(oldLabels, renames).Labels.Where(label => !newLabels.Contains(label, StringComparer.Ordinal)).ToArray();
+
+    /// <summary>
     /// The statements-to-be for turning <paramref name="oldLabels"/> into <paramref name="newLabels"/>, in the order to run them, or null when the
     /// change is not only insertions (or there is nothing to add). A label that goes after every old label is a plain <c>ADD VALUE</c>; one before an old
     /// label is <c>BEFORE</c> the first old label after it; the others go <c>AFTER</c> the label before them, which exists by then.

@@ -23,6 +23,12 @@ public sealed class DependencyGraph
     /// <summary>The replaced (live) model's privileges on objects when it leaves grants out (G-87), for re-granting a recreated object (G-116).</summary>
     public IReadOnlyList<UnmodeledPrivilege> ReplacedUnmodeledPrivileges { get; internal set; } = [];
 
+    /// <summary>
+    /// The replaced (live) model's tables, by key (G-191): which columns use an enum type today, and their defaults, for the swap that rebuilds a type
+    /// whose labels are removed or reordered while columns use it.
+    /// </summary>
+    public IReadOnlyDictionary<string, PgProj.Semantics.TableDefinition> ReplacedTables { get; internal set; } = new Dictionary<string, PgProj.Semantics.TableDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+
     /// <summary>The replaced (live) model's view dependencies (G-103).</summary>
     public IReadOnlyList<LiveDependency> ReplacedDependencies { get; internal set; } = [];
 

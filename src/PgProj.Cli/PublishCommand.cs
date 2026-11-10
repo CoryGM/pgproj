@@ -32,10 +32,11 @@ public static class PublishCommand
         };
         var allowDestructiveOption = new Option<bool>("--allow-destructive")
         {
-            Description = "Allow --execute to run a script that can discard data or access: a dropped table, column, " +
+            Description = "Allow --execute to run a script that can discard data or access: a dropped table (a foreign table too), column, " +
                 "materialized view, extension, or composite type field; a changed column type that can lose a value (a widening such as varchar(50) " +
-                "to varchar(100) or int to bigint is not one); a cast, operator, aggregate, " +
-                "rule, publication, or event trigger that is dropped and not created again; a revoked grant or role membership; " +
+                "to varchar(100) or int to bigint is not one); a label removed from an enum type that columns use; a field of a composite type that " +
+                "columns use changed to a type that can lose a value; a cast, operator, aggregate, " +
+                "rule, publication, event trigger, foreign server, or user mapping that is dropped and not created again; a revoked grant or role membership; " +
                 "or a changed owner. Without this flag, --execute refuses to run such a script and lists the affected operations.",
         };
         var commentsOnlyOption = new Option<bool>("--comments-only")
@@ -46,9 +47,16 @@ public static class PublishCommand
         };
         var allowSuperuserStatementsOption = new Option<bool>(SuperuserStatements.OptionName)
         {
-            Description = "Allow --execute to run statements that PostgreSQL lets only a superuser run: a created, changed, or dropped event trigger, a table's internal (foreign-key) triggers enabled or disabled (ALTER TABLE ... TRIGGER ALL), and a function or procedure " +
-                "created or replaced LEAKPROOF or in an untrusted language (c, internal, plpython3u, ...). It is consent for this run, not a role switch: without it, --execute " +
+            Description = "Allow --execute to run statements that PostgreSQL lets only a superuser run: a created, changed, or dropped event trigger, a table's internal (foreign-key) triggers enabled or disabled (ALTER TABLE ... TRIGGER ALL), a function or procedure " +
+                "created or replaced LEAKPROOF or in an untrusted language (c, internal, plpython3u, ...), and a base type or its shell created, or its options changed with ALTER TYPE ... SET. It is consent for this run, not a role switch: without it, --execute " +
                 "refuses such a script even for a superuser and lists the statements; with it, a role that is not a superuser is refused before anything runs.",
+        };
+        var applySecretsOption = new Option<string[]>("--apply-secrets")
+        {
+            HelpName = "names",
+            Description = "Send the secrets of user mappings that already exist again, for a password that changed in PGPROJ_VAR_<name>: every variable the project's user mappings name, or only the variables listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is created. Each is an ALTER USER MAPPING ... OPTIONS (SET password :'name') in the script, which only --execute fills in. A name no user mapping's options use is refused before anything runs.",
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true,
         };
         var allowLockLimitOption = new Option<bool>(LockCapacity.OptionName)
         {
@@ -89,15 +97,18 @@ public static class PublishCommand
 
                 A project with tenants ("tenants" in pgproj.json, a schema per tenant built from one template) is published in parts: the shared changes in one transaction, with the pre- and post-deploy scripts, then each tenant in a transaction of its own, its script starting with SET search_path TO the tenant's schema. A tenant the tenant query or file lists whose schema does not exist yet has it created. Every part is checked before anything runs; a failure stops the run, says what was published, which part failed (rolled back), and what was not started, and publishing again finishes. A schema the query or file no longer lists is never dropped: a warning says to drop it by other means. --tenants a,b publishes only those tenants. A tenant's own scripts (tenants.predeploy and tenants.postdeploy) run in its transaction, around the template's changes, with :"tenant_schema", :'tenant_schema', and :'tenant_id' filled in; a file starting with -- pgproj: run when=tenant-changed or when=tenant-created runs only then, and a file of the project's own scripts marked when=changed only when there are changes. A printed or written script has a line before each tenant's part. See docs/notes/tenants.md.
 
+                Variables in the pre- and post-deploy scripts: a script may name a value with psql's syntax, :'name' (a string) or :"name" (an identifier), instead of writing it, for a secret or a value that differs between environments. --execute fills each in from the environment variable PGPROJ_VAR_<name> (PGPROJ_VAR_app_password for :'app_password'), only in what it runs, and refuses to run when one is not set; the value is never printed, and is masked in any error. A printed or written script keeps the variables as written, and a warning names them: run it with psql -v name=value -f <file>. The server may still log a statement it runs (log_statement); see docs/notes/variables.md.
+
                 Printing, saving, or running the script:
                   - By default the script is printed to the console. Use --output to save it to a file, and --execute to run it directly against the database (use --dry-run to preview without running it).
-                  - --execute runs the script in a single transaction; a script that is printed or written is not wrapped in one (a warning says so), so run it inside a transaction yourself (psql --single-transaction -f <file>).
+                  - --execute runs the script in a single transaction. A script that is printed or written carries the same transaction (BEGIN; ... COMMIT;), so psql -f <file> applies all of it or, when a statement fails, none of it; do not add psql's --single-transaction.
                   - --execute refuses to run a script that can discard data unless --allow-destructive is also given.
                   - Before anything runs, a warning names each change that rewrites, scans, or blocks writes to a table that already exists (a column type change, SET NOT NULL, a new index or constraint, SET ACCESS METHOD, ...), which on a large table holds its lock for as long as it takes.
+                  - Before anything runs, a warning names each statement that gives PUBLIC (every role, including roles created later) a privilege it does not have now, says what every role can then do, and how to keep it revoked: PostgreSQL's default given back to a type, domain, function, procedure, or the public schema the database has it revoked on, because the project does not revoke it (REVOKE ... FROM PUBLIC, which init writes); a rule that revokes it for new functions or types (ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC) the project does not have; and a grant to PUBLIC the project adds on an object that exists. A SECURITY DEFINER routine is marked. --allow-destructive does not cover it, as it takes nothing away.
                   - --lock-timeout <duration> bounds how long each statement waits for a lock: past it, the script is rolled back and the statement named, instead of the publish stalling everything behind it.
-                  - --concurrently moves the slow part of new indexes and constraints on tables that already exist out of the transaction: after it commits, each index is built with CREATE INDEX CONCURRENTLY (on a partitioned table: created ON ONLY the parent, then built on each partition and attached), a changed index is built under a temporary name and swapped in, and each new foreign key or CHECK constraint, added NOT VALID in the transaction, is validated. These statements run one at a time, each on its own; a failed one has what it built dropped, is named with the error, and the next publish --concurrently does the rest. A printed or written script has them after a line that says so; run the part above it in one transaction and the part below it without one.
+                  - --concurrently moves the slow part of new indexes and constraints on tables that already exist out of the transaction: after it commits, each index is built with CREATE INDEX CONCURRENTLY (on a partitioned table: created ON ONLY the parent, then built on each partition and attached), a changed index is built under a temporary name and swapped in, and each new foreign key or CHECK constraint, added NOT VALID in the transaction, is validated. These statements run one at a time, each on its own; a failed one has what it built dropped, is named with the error, and the next publish --concurrently does the rest. A printed or written script has them after its COMMIT, below a line that says so; run it with psql -v ON_ERROR_STOP=1 -f <file>, so they are not run after a failed transaction.
                   - An index PostgreSQL marks INVALID (left by a failed CREATE INDEX CONCURRENTLY) is rebuilt: concurrently with --concurrently, in the transaction without it.
-                  - --execute refuses a script with statements only a superuser can run (an event trigger; ALTER TABLE ... TRIGGER ALL on foreign-key triggers; a LEAKPROOF routine or one in an untrusted language such as c) unless --allow-superuser-statements is also given, and then refuses a connected role that is not a superuser, before running anything. A printed or written script starts with a comment naming them, and a warning says so.
+                  - --execute refuses a script with statements only a superuser can run (an event trigger; ALTER TABLE ... TRIGGER ALL on foreign-key triggers; a LEAKPROOF routine or one in an untrusted language such as c; a base type, its shell, or ALTER TYPE ... SET on one) unless --allow-superuser-statements is also given, and then refuses a connected role that is not a superuser, before running anything. A printed or written script starts with a comment naming them, and a warning says so.
                   - --execute refuses a script estimated to need more locks than the server's lock table holds (max_locks_per_transaction * (max_connections + max_prepared_transactions); one transaction keeps every relation it changes locked until it commits) unless --allow-lock-limit is also given; from 80% of it, publish warns, and a printed or written script is only warned about.
                   - --execute also refuses, before running anything, a project that names a tablespace or a role the server lacks or uses a feature the server's version lacks, or that changes a collation, a text search dictionary's template, or a configuration's parser that something still uses (it names each one); --dry-run and --output only warn about the first three.
 
@@ -153,6 +164,7 @@ public static class PublishCommand
         command.Options.Add(commentsOnlyOption);
         command.Options.Add(allowSuperuserStatementsOption);
         command.Options.Add(allowLockLimitOption);
+        command.Options.Add(applySecretsOption);
         command.Options.Add(lockTimeoutOption);
         command.Options.Add(concurrentlyOption);
         command.Options.Add(tenantsOption);
@@ -206,9 +218,12 @@ public static class PublishCommand
                         AllowDestructive = parseResult.GetValue(allowDestructiveOption),
                         AllowSuperuserStatements = parseResult.GetValue(allowSuperuserStatementsOption),
                         AllowLockLimit = parseResult.GetValue(allowLockLimitOption),
+                        // --apply-secrets alone sends every secret; with names, those (G-132).
+                        ApplySecrets = parseResult.GetResult(applySecretsOption) is null ? null : DiffCommand.SplitTenantIdentifiers(parseResult.GetValue(applySecretsOption)),
                         LockTimeout = lockTimeout,
                         Concurrently = concurrently,
                         CommentsOnly = commentsOnly,
+                        Variables = ScriptVariableSettings.Read(),
                         Progress = new LogProgress(
                             log,
                             announceProjectFile: sourceConnection is not null,
@@ -316,10 +331,7 @@ public static class PublishCommand
     /// <summary>A duration PostgreSQL's <c>lock_timeout</c> accepts (G-270); the engine decides.</summary>
     internal static bool IsDuration(string value) => PublishTexts.IsDuration(value);
 
-    /// <summary>The warning for a script that is printed or written without a transaction (G-165); the engine words it.</summary>
-    internal const string ScriptNotTransactionalWarning = PublishTexts.ScriptNotTransactionalWarning;
-
-    /// <summary>The same for a <c>--concurrently</c> script (G-271).</summary>
+    /// <summary>The warning for a printed or written <c>--concurrently</c> script, whose last part runs outside its transaction (G-271, G-165); the engine words it.</summary>
     internal const string ConcurrentScriptWarning = PublishTexts.ConcurrentScriptWarning;
 
     private static Option<string> CreateProjectOption()

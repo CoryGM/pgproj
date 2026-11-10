@@ -23,6 +23,15 @@ public sealed record TableDefinition(
     public SqlNode? DeclarationNode { get; init; }
 
     /// <summary>True for <c>CREATE UNLOGGED TABLE</c> (G-24b).</summary>
+    /// <summary>The server of a foreign table (G-133); null for a table of the database's own. A foreign table keeps no rows here: they are the server's.</summary>
+    public string? ForeignServer { get; init; }
+
+    /// <summary>A foreign table's <c>OPTIONS (...)</c> (G-133), compared by name in no order (<see cref="ForeignOptions"/>).</summary>
+    public IReadOnlyList<ForeignOptionDefinition> ForeignOptions { get; init; } = [];
+
+    /// <summary>True for a foreign table (G-133).</summary>
+    public bool IsForeign => ForeignServer is not null;
+
     public bool IsUnlogged { get; init; }
 
     /// <summary>The table's <c>TABLESPACE</c> name, or null for the database default.</summary>

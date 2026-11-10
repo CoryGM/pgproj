@@ -48,11 +48,11 @@ public sealed class TypeBodyParsingTests
     }
 
     [TestMethod]
-    public void AShellOrBaseTypeIsNotAType()
+    public void AShellIsNotATypeAndABaseTypeIsOne()
     {
-        // Replaces AShellTypeHasNoForm: a shell or base type is no longer a type with no form, it is not modeled (G-241).
+        // Replaces AShellOrBaseTypeIsNotAType: a base type was not modeled (G-241) until the user chose to model it (G-267, 2026-11-09); a shell stays a marker.
         Assert.IsEmpty(new PgQueryParser().Parse("CREATE TYPE public.shell_type;").Types);
-        Assert.IsEmpty(new PgQueryParser().Parse("CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout);").Types);
+        Assert.AreEqual("base", Single("CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout);").Form);
     }
 
     private static TypeNode Single(string sql) => new PgQueryParser().Parse(sql).Types.Single();

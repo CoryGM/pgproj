@@ -12,7 +12,7 @@ namespace PgProj.Parser.Tests;
 public sealed class UnmodeledStatementParsingTests
 {
     [TestMethod]
-    [DataRow("CREATE FOREIGN DATA WRAPPER w;", "CREATE FOREIGN DATA WRAPPER")]
+    [DataRow("CREATE CONVERSION c FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;", "CREATE CONVERSION")] // a wrapper was the example until G-132 modeled it
     [DataRow("CREATE COLLATION public.c FROM \"C\";", "CREATE COLLATION ... FROM")]
     [DataRow("CREATE ROLE r;", "CREATE ROLE")]
     [DataRow("ALTER STATISTICS public.st SET STATISTICS 100;", "ALTER STATISTICS")]
@@ -134,23 +134,18 @@ public sealed class UnmodeledStatementParsingTests
     }
 
     /// <summary>
-    /// G-241: a shell type and a base type are not modeled (the user's decision of 2026-10-13). This replaces the shell type's row in
-    /// <see cref="AModeledStatementHasNoSuchWarning"/>. The statement is still read, as a marker that names the functions to leave out with it.
+    /// G-267: a base type is modeled (the user's design of 2026-11-09), and a shell is one with it: neither is an unmodeled statement. A shell is still read as a marker,
+    /// and <see cref="BaseTypeApplier"/> warns about one only when no file of the project defines it. Replaces G-241's test, which had both warned about here.
     /// </summary>
     [TestMethod]
-    [DataRow("CREATE TYPE public.sh;", "CREATE TYPE (shell type) is not modeled; the statement is ignored: CREATE TYPE public.sh")]
-    [DataRow(
-        "CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout);",
-        "CREATE TYPE (base type) is not modeled (a base type needs C or internal functions and a superuser); the statement and the functions it names are ignored: CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout)")]
-    public void AShellOrBaseTypeIsAWarningAndOnlyAMarker(string sql, string message)
+    [DataRow("CREATE TYPE public.sh;", typeof(BaseTypeNode))]
+    [DataRow("CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout);", typeof(TypeNode))]
+    public void AShellOrBaseTypeIsNotAnUnmodeledStatement(string sql, Type nodeType)
     {
         var tree = Parse(sql);
 
-        var diagnostic = tree.Diagnostics.Single();
-        Assert.AreEqual(SqlDiagnosticSeverity.Warning, diagnostic.Severity);
-        Assert.AreEqual("UnmodeledStatement", diagnostic.Source);
-        Assert.AreEqual(message, diagnostic.Message);
-        Assert.IsInstanceOfType<BaseTypeNode>(tree.Nodes.Single());
+        Assert.IsEmpty(tree.Diagnostics);
+        Assert.IsInstanceOfType(tree.Nodes.Single(), nodeType);
     }
 
     [TestMethod]
@@ -176,19 +171,41 @@ public sealed class UnmodeledStatementParsingTests
     [TestMethod]
     public void AnUnmodeledStatementLeavesTheStatementsAroundItAlone()
     {
-        var tree = Parse("CREATE TABLE public.a (x int); CREATE FOREIGN DATA WRAPPER wrap; CREATE TABLE public.b (y int);");
+        var tree = Parse("CREATE TABLE public.a (x int); CREATE CONVERSION c FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8; CREATE TABLE public.b (y int);");
 
         CollectionAssert.AreEqual(new[] { "a", "b" }, tree.Nodes.OfType<TableNode>().Select(static table => table.Name).ToArray());
         Assert.HasCount(1, tree.Diagnostics);
     }
 
     [TestMethod]
-    public void AForeignTablesColumnsNoLongerLeakIntoTheModel()
+    public void AForeignTableIsATableWithItsServerAndNoWarning()
     {
+        // Modeled since G-133 (until then, reported and ignored): its columns are the table's, with its server.
         var tree = Parse("CREATE FOREIGN TABLE public.ft (a int, b text) SERVER s;");
 
+        var table = tree.Nodes.OfType<TableNode>().Single();
+        Assert.AreEqual("s", table.ForeignServer);
+        CollectionAssert.AreEqual(new[] { "a", "b" }, table.Columns.Select(static column => column.Name).ToArray());
+        Assert.IsEmpty(tree.Diagnostics);
+    }
+
+    [TestMethod]
+    public void ImportForeignSchemaIsStillReported()
+    {
+        var tree = Parse("IMPORT FOREIGN SCHEMA remote FROM SERVER s INTO public;");
+
         Assert.IsEmpty(tree.Nodes);
-        StringAssert.StartsWith(tree.Diagnostics.Single().Message, "CREATE FOREIGN TABLE is not modeled");
+        StringAssert.StartsWith(tree.Diagnostics.Single().Message, "IMPORT FOREIGN SCHEMA is not modeled");
+    }
+
+    [TestMethod]
+    public void AnAlterForeignTableIsReadAsATablesActions()
+    {
+        // Until G-133 an ALTER FOREIGN TABLE was reported as a whole; now its actions are a table's, an unread one warned about by the applier.
+        var tree = Parse("ALTER FOREIGN TABLE public.ft ADD COLUMN b int;");
+
+        Assert.AreEqual("b", tree.Nodes.OfType<AlterTableAddColumnNode>().Single().Column.Name);
+        Assert.IsEmpty(tree.Diagnostics);
     }
 
     [TestMethod]
@@ -222,7 +239,6 @@ public sealed class UnmodeledStatementParsingTests
     [DataRow("ALTER VIEW public.v SET (security_barrier = true);", "ALTER VIEW")]
     [DataRow("ALTER MATERIALIZED VIEW public.mv SET (fillfactor = 50);", "ALTER MATERIALIZED VIEW")]
     [DataRow("ALTER TYPE public.comp ADD ATTRIBUTE y int;", "ALTER TYPE")]
-    [DataRow("ALTER FOREIGN TABLE public.ft ADD COLUMN b int;", "ALTER FOREIGN TABLE")]
     [DataRow("ALTER INDEX public.i SET (fillfactor = 50);", "ALTER INDEX")]
     public void AnAlterOfSomethingOtherThanATableIsNamedForWhatItIs(string sql, string kind)
     {

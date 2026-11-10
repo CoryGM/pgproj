@@ -4,7 +4,7 @@ using PgProj.Semantics;
 
 namespace PgProj.Engine;
 
-/// <summary>What <c>build</c> checks in the pre- and post-deployment scripts (G-124, G-290e): their syntax, and their use of the tenant variables.</summary>
+/// <summary>What <c>build</c> checks in the pre- and post-deployment scripts (G-124, G-290e, G-336, G-335): their syntax, their variables, and their transaction control.</summary>
 internal static class DeployScriptCheck
 {
     // The diagnostics say where they come from, and always have: this class was DeployScripts in the CLI.
@@ -30,8 +30,9 @@ internal static class DeployScriptCheck
             .Select(diagnostic => new SemanticDiagnostic(SemanticDiagnosticSeverity.Error, diagnostic.Message, SemanticLocation.FromSql(file.FilePath, diagnostic), diagnostic.Source));
 
     /// <summary>
-    /// <c>build</c>'s check of the scripts' variables and syntax (G-290e): the project's own scripts may not use a variable; a tenant's are checked with the
-    /// stand-in's values (an unknown variable is an error), then syntax-checked as the project's are. Each problem names its file.
+    /// <c>build</c>'s check of the scripts' variables and syntax (G-290e, G-336): the project's own scripts may use any variable but a tenant's
+    /// (<c>tenant_schema</c>, <c>tenant_id</c>); a tenant's are checked with the stand-in's values for those two, any other variable being one the
+    /// environment gives <c>publish --execute</c>, then syntax-checked as the project's are. Each problem names its file. No value is read.
     /// </summary>
     public static IEnumerable<SemanticDiagnostic> Check(PgProject project, PgQueryParser parser)
     {
@@ -43,6 +44,11 @@ internal static class DeployScriptCheck
             if (ProjectVariables(file) is { } problem)
             {
                 yield return problem;
+            }
+
+            foreach (var statement in TransactionControl(file, file.Text))
+            {
+                yield return statement;
             }
         }
 
@@ -60,31 +66,47 @@ internal static class DeployScriptCheck
         }
     }
 
-    /// <summary>The error when one of the project's own script files uses a variable (G-290e), or null.</summary>
+    /// <summary>
+    /// The error when one of the project's own script files uses a tenant's variable (G-290e: <c>tenant_schema</c>, <c>tenant_id</c>, which only a tenant's
+    /// scripts have), or null. Any other variable is the environment's (G-336).
+    /// </summary>
     public static SemanticDiagnostic? ProjectVariables(ScriptSourceFile file)
-        => ScriptVariables.Substitute(file.Text, new Dictionary<string, string>(StringComparer.Ordinal)) is { UsesAny: true } used
+        => ScriptVariables.Names(file.Text).Where(PublishTexts.IsTenantVariable).ToArray() is { Length: > 0 } tenantOnly
             ? SemanticDiagnostics.Error(
-                $"The project's deploy script uses {string.Join(", ", used.Unknown.Select(static name => $":'{name}'"))}: variables are only for a tenant's scripts (tenants.predeploy and tenants.postdeploy), which run once per tenant.",
+                $"The project's deploy script uses {string.Join(", ", tenantOnly.Select(static name => $":'{name}'"))}: tenant_schema and tenant_id are only for a tenant's scripts (tenants.predeploy and tenants.postdeploy), which run once per tenant.",
                 new SemanticLocation(file.FilePath, null),
                 Source)
             : null;
 
-    /// <summary>A tenant's script file checked with the stand-in's values (G-290e): an unknown variable, then the substituted text's syntax errors.</summary>
+    /// <summary>
+    /// A tenant's script file checked with the stand-in's values (G-290e) for the tenant's variables, any other variable being the environment's (G-336), then
+    /// the text's syntax errors, the environment's variables replaced by stand-ins of the same length.
+    /// </summary>
     public static IEnumerable<SemanticDiagnostic> TenantScript(ScriptSourceFile file, PgProjectTenants tenants, PgQueryParser parser)
     {
         var standIn = new Dictionary<string, string>(StringComparer.Ordinal) { ["tenant_schema"] = tenants.StandInSchema, ["tenant_id"] = tenants.StandInSchema };
-        var substituted = ScriptVariables.Substitute(file.Text, standIn);
-        if (substituted.Unknown.Count > 0)
-        {
-            yield return SemanticDiagnostics.Error(
-                $"A tenant's script uses {string.Join(", ", substituted.Unknown.Select(static name => $":'{name}'"))}, which pgproj does not set; the variables are tenant_schema and tenant_id (:\"tenant_schema\", :'tenant_schema', :'tenant_id').",
-                new SemanticLocation(file.FilePath, null),
-                Source);
-        }
-
-        foreach (var diagnostic in parser.Parse(substituted.Text).Diagnostics.Where(static d => d.Severity == SqlDiagnosticSeverity.Error))
+        var substituted = ScriptVariables.StandIn(ScriptVariables.Substitute(file.Text, standIn).Text);
+        foreach (var diagnostic in parser.Parse(substituted).Diagnostics.Where(static d => d.Severity == SqlDiagnosticSeverity.Error))
         {
             yield return new SemanticDiagnostic(SemanticDiagnosticSeverity.Error, diagnostic.Message, SemanticLocation.FromSql(file.FilePath, diagnostic), diagnostic.Source);
         }
+
+        foreach (var statement in TransactionControl(file, substituted))
+        {
+            yield return statement;
+        }
     }
+
+    /// <summary>
+    /// A script file's statements that do not belong in the transaction pgproj publishes in (G-335): one that ends it or that PostgreSQL refuses in a
+    /// transaction block is an error, a <c>BEGIN</c> a warning, each at its statement. <paramref name="text"/> is the file's text as checked: the
+    /// environment's variables (G-336) are replaced by same-length stand-ins here, so the positions are the file's.
+    /// </summary>
+    public static IEnumerable<SemanticDiagnostic> TransactionControl(ScriptSourceFile file, string text)
+        => PgQueryParser.FindTransactionControl(ScriptVariables.StandIn(text))
+            .Select(diagnostic => new SemanticDiagnostic(
+                diagnostic.Severity == SqlDiagnosticSeverity.Error ? SemanticDiagnosticSeverity.Error : SemanticDiagnosticSeverity.Warning,
+                diagnostic.Message,
+                SemanticLocation.FromSql(file.FilePath, diagnostic),
+                diagnostic.Source));
 }

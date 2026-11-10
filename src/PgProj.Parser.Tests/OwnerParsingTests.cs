@@ -163,8 +163,8 @@ public sealed class OwnerParsingTests
     [TestMethod]
     [DataRow("ALTER LANGUAGE plpgsql OWNER TO x;")]
     [DataRow("ALTER INDEX app.i OWNER TO x;")]
-    [DataRow("ALTER FOREIGN DATA WRAPPER w OWNER TO x;")]
-    [DataRow("ALTER SERVER s OWNER TO x;")]
+    // A wrapper and a server were examples until G-132 modeled their owners.
+    [DataRow("ALTER CONVERSION c OWNER TO x;")]
     public void AnOwnerOfAKindThatIsNotModeledIsStillReported(string sql)
     {
         // Act

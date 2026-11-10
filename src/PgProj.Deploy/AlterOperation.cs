@@ -16,6 +16,9 @@ public sealed record class AlterOperation : SqlOperation
             IndexDefinition newIndex when Change.OldNode is IndexDefinition oldIndex => GenerateAlterIndex(oldIndex, newIndex, Change.Details),
             ViewDefinition newView => GenerateAlterView(Change.OldNode as ViewDefinition, newView),
             PublicationDefinition newPublication when Change.OldNode is PublicationDefinition oldPublication => CreateOperation.GenerateAlterPublication(oldPublication, newPublication, Change.Details),
+            ForeignDataWrapperDefinition newWrapper when Change.OldNode is ForeignDataWrapperDefinition oldWrapper => ForeignDataSql.AlterWrapper(oldWrapper, newWrapper),
+            ForeignServerDefinition newServer when Change.OldNode is ForeignServerDefinition oldServer => ForeignDataSql.AlterServer(oldServer, newServer),
+            UserMappingDefinition newMapping when Change.OldNode is UserMappingDefinition oldMapping => ForeignDataSql.AlterMapping(oldMapping, newMapping),
             TextSearchDictionaryDefinition newDictionary when Change.OldNode is TextSearchDictionaryDefinition oldDictionary => TextSearchSqlBuilder.AlterDictionary(oldDictionary, newDictionary),
             TextSearchConfigurationDefinition newConfiguration when Change.OldNode is TextSearchConfigurationDefinition oldConfiguration => TextSearchSqlBuilder.AlterConfiguration(oldConfiguration, newConfiguration),
             CollationDefinition newCollation => CommentSqlHelper.GenerateObjectComment("COLLATION", newCollation.SchemaName, newCollation.Name, newCollation.Comment)
@@ -66,9 +69,11 @@ public sealed record class AlterOperation : SqlOperation
         }
 
         var qualifiedName = FormatQualifiedName(newType.SchemaName, newType.Name);
-        var statements = IsCompositeChange(oldType, newType)
-            ? GenerateAlterCompositeFields(qualifiedName, oldType, newType)
-            : GenerateAddEnumValues(qualifiedName, oldType, newType);
+        var statements = newType.IsBaseType
+            ? GenerateAlterBaseType(qualifiedName, oldType, newType)
+            : IsCompositeChange(oldType, newType)
+                ? GenerateAlterCompositeFields(qualifiedName, oldType, newType)
+                : GenerateAddEnumValues(qualifiedName, oldType, newType);
 
         if (!string.Equals(oldType.Comment, newType.Comment, StringComparison.Ordinal))
         {
@@ -80,6 +85,32 @@ public sealed record class AlterOperation : SqlOperation
         // A composite type's fields' comments (G-216), after any field changes, so a field added here can take its comment.
         statements.AddRange(CommentSqlHelper.GenerateColumnCommentChanges(newType.SchemaName, newType.Name, oldType.ColumnComments, newType.ColumnComments));
         return string.Join("\n", statements);
+    }
+
+    /// <summary>
+    /// A base type's options that change in place (G-267, the user's design of 2026-11-09, item 3), in one <c>ALTER TYPE ... SET (...)</c>: a function as the project
+    /// writes it, or <c>NONE</c> when it no longer names one, and the storage. Only a superuser may run it, even the type's owner (checked on PostgreSQL 18).
+    /// </summary>
+    private static List<string> GenerateAlterBaseType(string qualifiedName, TypeDefinition oldType, TypeDefinition newType)
+    {
+        if (oldType.BaseTypeOptions is not { } oldOptions || newType.BaseTypeOptions is not { } newOptions)
+        {
+            return [];
+        }
+
+        var settings = new List<string>();
+        foreach (var option in oldOptions.DifferencesFrom(newOptions).Where(BaseTypeOptionsDefinition.AlterableOptions.Contains))
+        {
+            if (option == "STORAGE")
+            {
+                settings.Add($"STORAGE = {newOptions.Storage switch { "e" => "external", "m" => "main", "x" => "extended", _ => "plain" }}");
+                continue;
+            }
+
+            settings.Add($"{option} = {(newOptions.WrittenFunctions.TryGetValue(option, out var written) || newOptions.Functions.TryGetValue(option, out written) ? written : "NONE")}");
+        }
+
+        return settings.Count == 0 ? [] : [$"ALTER TYPE {qualifiedName} SET ({string.Join(", ", settings)});"];
     }
 
     /// <summary>
@@ -117,8 +148,12 @@ public sealed record class AlterOperation : SqlOperation
     {
         static string Literal(string label) => "'" + label.Replace("'", "''", StringComparison.Ordinal) + "'";
 
-        return (EnumLabelAdditions.Plan(oldType.EnumLabels, newType.EnumLabels) ?? [])
-            .Select(step => $"ALTER TYPE {qualifiedName} ADD VALUE {Literal(step.Label)}{(step.Position is null ? string.Empty : $" {step.Position} {Literal(step.Neighbour!)}")};")
+        // The renames the project's annotations ask for (G-191), lossless, then the inserted labels, placed among the labels as renamed.
+        var (renamed, renames) = EnumLabelAdditions.ApplyRenames(oldType.EnumLabels, newType.EnumLabelRenames);
+        return renames
+            .Select(rename => $"ALTER TYPE {qualifiedName} RENAME VALUE {Literal(rename.From)} TO {Literal(rename.To)};")
+            .Concat((EnumLabelAdditions.Plan(renamed, newType.EnumLabels) ?? [])
+                .Select(step => $"ALTER TYPE {qualifiedName} ADD VALUE {Literal(step.Label)}{(step.Position is null ? string.Empty : $" {step.Position} {Literal(step.Neighbour!)}")};"))
             .ToList();
     }
 
@@ -127,8 +162,8 @@ public sealed record class AlterOperation : SqlOperation
     /// longer has is dropped, one whose type changed is retyped, and a new one is added, in that order. PostgreSQL appends an
     /// added field, so one written in the middle of the type ends up last in the database; field order is not compared (G-110),
     /// so the type still converges. <c>ALTER ATTRIBUTE ... TYPE</c> is refused by PostgreSQL while any table column uses the
-    /// type (the publish then rolls back); dropping and recreating the type fails in that case too, and in every other case in
-    /// which anything uses it. <c>CASCADE</c> is written when a typed table is of the type (G-136), and only then: it carries the field to that table, which the table's own change does not repeat.
+    /// type, so a retype under columns is not made here: the type is rebuilt under them (G-119, <see cref="CompositeSwapOperation"/>), or refused by
+    /// name. Dropping and recreating the type would fail whenever anything uses it. <c>CASCADE</c> is written when a typed table is of the type (G-136), and only then: it carries the field to that table, which the table's own change does not repeat.
     /// </summary>
     private static List<string> GenerateAlterCompositeFields(string qualifiedName, TypeDefinition oldType, TypeDefinition newType)
     {
@@ -599,6 +634,12 @@ public sealed record class AlterOperation : SqlOperation
 
         var statements = new List<string>();
 
+        // A foreign table's own options, in place (G-133); a changed server drops and creates it instead.
+        if (newTable.IsForeign && oldTable.IsForeign)
+        {
+            ForeignDataSql.AddOptionChanges(statements, $"ALTER FOREIGN TABLE {qualifiedName}", oldTable.ForeignOptions, newTable.ForeignOptions);
+        }
+
         if (details.Any(static detail => detail.PropertyName == nameof(TableDefinition.WithoutCluster)))
         {
             statements.Add(CommentSqlHelper.GenerateWithoutCluster(newTable.SchemaName, newTable.Name));
@@ -820,6 +861,12 @@ public sealed record class AlterOperation : SqlOperation
             {
                 statements.Add($"ALTER TABLE {qualifiedName} ALTER COLUMN {QuoteIdentifier(newColumn.Name)} SET COMPRESSION {newColumn.Compression};");
             }
+
+            // A foreign table's column's options, in place (G-133).
+            if (newTable.IsForeign)
+            {
+                ForeignDataSql.AddOptionChanges(statements, $"ALTER FOREIGN TABLE {qualifiedName} ALTER COLUMN {QuoteIdentifier(newColumn.Name)}", oldColumn.ForeignOptions, newColumn.ForeignOptions);
+            }
         }
 
         // Storage parameters (G-24b): a changed or added option is SET, a removed one is RESET back to its default; PostgreSQL
@@ -909,8 +956,8 @@ public sealed record class AlterOperation : SqlOperation
         if (!string.Equals(oldTable.Comment, newTable.Comment, StringComparison.Ordinal))
         {
             statements.Add(newTable.Comment is null
-                ? CommentSqlHelper.GenerateTableCommentClear(newTable.SchemaName, newTable.Name)
-                : CommentSqlHelper.GenerateTableComment(newTable.SchemaName, newTable.Name, newTable.Comment)!);
+                ? CommentSqlHelper.GenerateTableCommentClear(newTable.SchemaName, newTable.Name, newTable.IsForeign)
+                : CommentSqlHelper.GenerateTableComment(newTable.SchemaName, newTable.Name, newTable.Comment, newTable.IsForeign)!);
         }
 
         return statements.Count == 0

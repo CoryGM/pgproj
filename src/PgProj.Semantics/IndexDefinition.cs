@@ -103,6 +103,14 @@ public sealed record IndexDefinition(
     public string? ServerRenderedPredicate { get; init; }
 
     /// <summary>
+    /// Each key as PostgreSQL itself renders it (<c>pg_get_indexdef(index, k, true)</c>), in key order, or null when not available (G-344). Only an expression
+    /// key's is compared; a column's is its name. A live index carries its own; a project index carries its expression keys' renderings on temporary indexes
+    /// over a copy of the live table, made during <c>diff</c>/<c>publish</c>, as <see cref="ServerRenderedPredicate"/> is: PostgreSQL types a literal by
+    /// what it is compared with (<c>c = 'r'</c> on an enum is <c>c = 'r'::color</c>), which the parsed comparison cannot know.
+    /// </summary>
+    public IReadOnlyList<string?>? ServerRenderedKeys { get; init; }
+
+    /// <summary>
     /// False for a live index PostgreSQL marks <c>INVALID</c> (<c>pg_index.indisvalid</c>), left by a failed <c>CREATE INDEX CONCURRENTLY</c> (G-271): it is
     /// not used by queries and is rebuilt. Always true for a project index.
     /// </summary>

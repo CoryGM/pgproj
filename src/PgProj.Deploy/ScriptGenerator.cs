@@ -1,4 +1,4 @@
-﻿using PgProj.Dependencies;
+using PgProj.Dependencies;
 using PgProj.Diff;
 using PgProj.Semantics;
 
@@ -33,12 +33,32 @@ public sealed partial class ScriptGenerator
 
         // A collation that something uses cannot be dropped to be created again (PostgreSQL refuses), so a change to one in use is not carried out (G-148).
         var changedCollationsInUse = FindChangedObjectsInUse(modifiedChanges, graph);
+
+        // An enum type that loses or reorders a label under table columns is rebuilt under them instead (G-191); what else uses one keeps it refused.
+        // typeSwaps holds the composite types rebuilt the same way too (G-119), below.
+        var swapRefusals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var typeSwaps = FindEnumSwaps(changedCollationsInUse, modifiedChanges, graph, swapRefusals);
         foreach (var (key, users) in changedCollationsInUse)
         {
-            operations.Add(BlockedChangedObject(modifiedChanges.First(change => string.Equals(change.NodeId, key, StringComparison.Ordinal)), users));
+            if (!typeSwaps.ContainsKey(key))
+            {
+                operations.Add(BlockedChangedObject(modifiedChanges.First(change => string.Equals(change.NodeId, key, StringComparison.Ordinal)), users, swapRefusals.GetValueOrDefault(key)));
+            }
         }
 
-        modifiedChanges = modifiedChanges.Where(change => !changedCollationsInUse.ContainsKey(change.NodeId)).ToArray();
+        // A composite type that retypes a field under table columns is rebuilt under them the same way (G-119); one that cannot be is refused, naming why.
+        var compositeRefusals = new List<SqlOperation>();
+        var compositeSwaps = FindCompositeSwaps(modifiedChanges, graph, compositeRefusals);
+        operations.AddRange(compositeRefusals);
+        var refusedComposites = compositeRefusals.Select(static operation => operation.NodeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, swap) in compositeSwaps)
+        {
+            typeSwaps[key] = swap;
+        }
+
+        modifiedChanges = modifiedChanges
+            .Where(change => (!changedCollationsInUse.ContainsKey(change.NodeId) || typeSwaps.ContainsKey(change.NodeId)) && !refusedComposites.Contains(change.NodeId))
+            .ToArray();
 
         var addedByNodeId = addedChanges.ToDictionary(change => change.NodeId, PgProj.Parser.SqlIdentifiers.NameComparer);
         var modifiedByNodeId = modifiedChanges.ToDictionary(change => change.NodeId, PgProj.Parser.SqlIdentifiers.NameComparer);
@@ -50,6 +70,30 @@ public sealed partial class ScriptGenerator
 
         var replaceInPlace = FindRoutinesReplacedInPlace(modifiedChanges, graph, orderedNodeIdSet);
 
+        // A base type the script drops, to remove it or to create it again, is dropped with CASCADE, which takes its support functions with it (G-267): they are not
+        // dropped on their own, and those of a type created again are created again before it.
+        var cascadedFunctions = FindCascadedSupportFunctions(removedChanges, modifiedChanges, graph);
+        var supportReasons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is TypeDefinition { IsBaseType: true } && IsDropAndRecreateObject(change)))
+        {
+            foreach (var node in graph.Nodes.Values.Where(node => graph.IsTargetNode(node.NodeId) && IsOwnSupportFunction(node.SemanticNode, (TypeDefinition)rebuilt.NewNode)))
+            {
+                cascadedFunctions.Add(node.NodeId);
+                supportReasons[node.NodeId] = $"its base type {rebuilt.NodeId} is dropped and created again, and its functions with it";
+                if (!addedByNodeId.ContainsKey(node.NodeId) && !modifiedByNodeId.ContainsKey(node.NodeId))
+                {
+                    modifiedByNodeId[node.NodeId] = new ModifiedChange
+                    {
+                        NodeId = node.NodeId,
+                        NodeKind = ChangeRecord.MapKind(node.SemanticNode),
+                        OldNode = node.SemanticNode,
+                        NewNode = node.SemanticNode,
+                        Details = [],
+                    };
+                }
+            }
+        }
+
         // The objects in the way of this publish are dropped before it and created again after it, from the project: those that use a
         // column a table alter drops or retypes (G-103), and those that use a routine it has to drop (G-105). One the project doesn't have
         // can't be recreated, so the script refuses it instead.
@@ -57,7 +101,7 @@ public sealed partial class ScriptGenerator
             .Where(change => change.NewNode is FunctionDefinition or ProcedureDefinition or OperatorDefinition or AggregateDefinition && IsDropAndRecreate(change, replaceInPlace))
             .Select(static change => change.NodeId)
             .ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer);
-        var rebuilds = FindDependentRebuilds(modifiedChanges, droppedRoutines, graph);
+        var rebuilds = FindDependentRebuilds(modifiedChanges, droppedRoutines, graph, typeSwaps.Values.SelectMany(static swap => swap.ColumnsByTable));
         var forcedRebuilds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var detaches = new List<SqlOperation>();
         var reattaches = new List<SqlOperation>();
@@ -136,6 +180,32 @@ public sealed partial class ScriptGenerator
             }
         }
 
+        // A check or an index with a predicate or expression on a swapped column compares it with the old type's labels, so it is dropped before the swap
+        // and created again after (G-191); a plain index or key moves with the column.
+        foreach (var swap in typeSwaps.Values)
+        {
+            foreach (var dependent in SwapDependents(swap, graph))
+            {
+                if (addedByNodeId.ContainsKey(dependent.Key) || removedByNodeId.ContainsKey(dependent.Key) || !forcedRebuilds.Add(dependent.Key))
+                {
+                    continue;
+                }
+
+                indexReasons[dependent.Key] = $"it uses a column of the {(swap.IsEnum ? "enum" : "composite")} type {swap.Change.NodeId}, which is rebuilt under it, and PostgreSQL cannot carry it through the change";
+                if (!modifiedByNodeId.ContainsKey(dependent.Key))
+                {
+                    modifiedByNodeId[dependent.Key] = new ModifiedChange
+                    {
+                        NodeId = dependent.Key,
+                        NodeKind = ChangeRecord.MapKind(dependent),
+                        OldNode = dependent,
+                        NewNode = dependent,
+                        Details = [],
+                    };
+                }
+            }
+        }
+
         // PostgreSQL recorded that each object in the way uses the routine being dropped; the project may not say so (a policy's expression,
         // for one), so the order drops it first and creates it after the routine anyway.
         if (droppedRoutines.Count > 0 && AddLiveRoutineEdges(graph, forcedRebuilds, droppedRoutines))
@@ -143,11 +213,56 @@ public sealed partial class ScriptGenerator
             orderedNodeIds = graph.TopologicalSort().Select(node => node.NodeId).ToArray();
         }
 
-        bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
+        // A foreign table dropped to move it to another server takes its triggers, statistics, and CHECKs with it: dropped first and created again after it (G-133);
+        // its columns are its own statement, and its grants and a stated owner are put back as for any object created again. What else uses it was refused above.
+        foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is TableDefinition && IsDropAndRecreateObject(change)))
+        {
+            var table = (TableDefinition)rebuilt.NewNode;
+            foreach (var node in graph.GetDependents(rebuilt.NodeId).Where(node => graph.IsTargetNode(node.NodeId)
+                && node.SemanticNode is ConstraintDefinition or TriggerDefinition or StatisticsDefinition
+                && IsCarriedWithForeignTable(node.SemanticNode, table)))
+            {
+                supportReasons[node.NodeId] = $"its foreign table {rebuilt.NodeId} is dropped and created again to move it to another server";
+                if (!addedByNodeId.ContainsKey(node.NodeId) && !modifiedByNodeId.ContainsKey(node.NodeId))
+                {
+                    modifiedByNodeId[node.NodeId] = new ModifiedChange
+                    {
+                        NodeId = node.NodeId,
+                        NodeKind = ChangeRecord.MapKind(node.SemanticNode),
+                        OldNode = node.SemanticNode,
+                        NewNode = node.SemanticNode,
+                        Details = [],
+                    };
+                }
+            }
+        }
+
+        // A server dropped to be created again takes its user mappings with it: they are dropped first and created again after it (G-132).
+        foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is ForeignServerDefinition && IsDropAndRecreateObject(change)))
+        {
+            var serverName = ((ForeignServerDefinition)rebuilt.NewNode).Name;
+            foreach (var node in graph.Nodes.Values.Where(node => graph.IsTargetNode(node.NodeId) && node.SemanticNode is UserMappingDefinition mapping && mapping.Server == serverName))
+            {
+                supportReasons[node.NodeId] = $"its server {serverName} is dropped and created again, and its user mappings with it";
+                if (!addedByNodeId.ContainsKey(node.NodeId) && !modifiedByNodeId.ContainsKey(node.NodeId))
+                {
+                    modifiedByNodeId[node.NodeId] = new ModifiedChange
+                    {
+                        NodeId = node.NodeId,
+                        NodeKind = ChangeNodeKind.UserMapping,
+                        OldNode = node.SemanticNode,
+                        NewNode = node.SemanticNode,
+                        Details = [],
+                    };
+                }
+            }
+        }
+        bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || typeSwaps.ContainsKey(change.NodeId) || supportReasons.ContainsKey(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
         string? DropReason(string nodeId)
             => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is dropped here and recreated below: {RebuildReason(nodeId)}." : null;
         string? CreateReason(string nodeId)
-            => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is recreated; it was dropped above because {RebuildReason(nodeId)}." : null;
+            => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is recreated; it was dropped above because {RebuildReason(nodeId)}."
+                : supportReasons.TryGetValue(nodeId, out var supportReason) ? $"{nodeId} is recreated: {supportReason}." : null;
         string RebuildReason(string nodeId) => rebuilds.Reasons.TryGetValue(nodeId, out var reason) ? reason : indexReasons[nodeId];
 
         // Defaults and domain CHECKs are detached before anything is dropped and put back once everything has been created (G-105).
@@ -158,7 +273,7 @@ public sealed partial class ScriptGenerator
         // DROP is never emitted before its dependent's DROP (G-27).
         foreach (var nodeId in orderedNodeIds.Reverse())
         {
-            if (!deferredRemovals.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var removed))
+            if (!deferredRemovals.Contains(nodeId) && !cascadedFunctions.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var removed))
             {
                 operations.Add(new DropOperation
                 {
@@ -168,7 +283,19 @@ public sealed partial class ScriptGenerator
                 });
             }
 
-            if (modifiedByNodeId.TryGetValue(nodeId, out var modified) && Recreates(modified))
+            if (modifiedByNodeId.TryGetValue(nodeId, out var swapped) && typeSwaps.TryGetValue(nodeId, out var swap))
+            {
+                // The type the database has makes way under another name, so the new one is created under its own, with no rename after it (G-191).
+                operations.Add(new EnumSwapRenameOperation
+                {
+                    NodeId = swapped.NodeId,
+                    NodeKind = swapped.NodeKind,
+                    SchemaName = swap.NewType.SchemaName,
+                    TypeName = swap.NewType.Name,
+                    Reason = $"{swapped.NodeId} {(swap.IsEnum ? "loses or reorders a label" : "retypes a field")} while columns use it: it is kept as {EnumSwapRenameOperation.OldName(swap.NewType.Name)}, created again below, its columns moved to it, and then dropped.",
+                });
+            }
+            else if (modifiedByNodeId.TryGetValue(nodeId, out var modified) && Recreates(modified) && !cascadedFunctions.Contains(nodeId))
             {
                 operations.Add(new DropOperation
                 {
@@ -221,6 +348,23 @@ public sealed partial class ScriptGenerator
                             ? ReaddCheck(create, check)
                             : [create]);
                     operations.AddRange(CommentAfterCreate(modified.NewNode, modified.NodeId, modified.NodeKind, graph, replaced: true));
+                    if (typeSwaps.TryGetValue(modified.NodeId, out var swapAfter) && !swapAfter.IsEnum)
+                    {
+                        operations.Add(CompositeSwap(swapAfter, modified));
+                    }
+                    else if (swapAfter is not null)
+                    {
+                        operations.Add(new EnumSwapOperation
+                        {
+                            NodeId = modified.NodeId,
+                            NodeKind = modified.NodeKind,
+                            SchemaName = swapAfter.NewType.SchemaName,
+                            TypeName = swapAfter.NewType.Name,
+                            Columns = swapAfter.Columns,
+                            RemovedLabels = swapAfter.RemovedLabels,
+                            Reason = $"The columns of {modified.NodeId} move to the new type through their text; a row holding a label it no longer has stops the publish.",
+                        });
+                    }
                 }
                 else
                 {
@@ -234,7 +378,7 @@ public sealed partial class ScriptGenerator
         // Phase 3: the drops that had to wait for an alter (G-52), still dependent-first among themselves.
         foreach (var nodeId in orderedNodeIds.Reverse())
         {
-            if (deferredRemovals.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var deferred))
+            if (deferredRemovals.Contains(nodeId) && !cascadedFunctions.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var deferred))
             {
                 operations.Add(new DropOperation
                 {
@@ -262,7 +406,7 @@ public sealed partial class ScriptGenerator
             AddModifiedOperations(operations, modified, replaceInPlace);
         }
 
-        AddUnorderedOperations(operations, removedChanges, orderedNodeIdSet, static removedChange => new DropOperation
+        AddUnorderedOperations(operations, removedChanges.Where(change => !cascadedFunctions.Contains(change.NodeId)), orderedNodeIdSet, static removedChange => new DropOperation
         {
             NodeId = removedChange.NodeId,
             NodeKind = removedChange.NodeKind,
@@ -272,7 +416,7 @@ public sealed partial class ScriptGenerator
         // A dropped and recreated object loses its privileges; the grants the project keeps on it are issued again after it is created
         // (G-116). A grant being added, removed, or changed in this publish already has its own operation.
         var changedGrantIds = addedByNodeId.Keys.Concat(removedByNodeId.Keys).Concat(modifiedByNodeId.Keys).ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer);
-        operations = InsertRegrants(operations, graph, changedGrantIds);
+        operations = InsertRegrants(InsertBaseTypeShells(operations), graph, changedGrantIds);
 
         return new OperationBatch
         {
@@ -336,6 +480,7 @@ public sealed partial class ScriptGenerator
             SequenceDefinition => "sequence",
             FunctionDefinition => "function",
             ProcedureDefinition => "procedure",
+            TypeDefinition type when !SqlOperation.IsExtension(type) => "type",
             _ => null,
         };
 
@@ -348,10 +493,13 @@ public sealed partial class ScriptGenerator
 
     private static List<SqlOperation> InsertRegrants(List<SqlOperation> operations, DependencyGraph graph, ISet<string> changedGrantIds)
     {
+        // A type rebuilt under its columns (G-191) is renamed out of the way rather than dropped, and the new one is just as new: it is owned by the role
+        // that deploys.
         var dropped = operations
             .OfType<DropOperation>()
             .Where(static operation => operation.NodeKind is not (ChangeNodeKind.Grant or ChangeNodeKind.Owner))
             .Select(static operation => operation.NodeId)
+            .Concat(operations.OfType<EnumSwapRenameOperation>().Select(static operation => operation.NodeId))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (dropped.Count == 0)
         {
@@ -370,7 +518,10 @@ public sealed partial class ScriptGenerator
 
             foreach (var grant in graph.GetDependents(create.NodeId).Select(static node => node.SemanticNode).OfType<GrantDefinition>())
             {
-                if (changedGrantIds.Contains(grant.Key) || !graph.IsTargetNode(grant.Key) || !regranted.Add(grant.Key))
+                // A revoked default only the database has, that the diff leaves alone because a rule of the project allows it (G-338), is put back too: a recreated
+                // object must not get PUBLIC's privilege back without a word, whichever role's rule it was created under.
+                var keptRevoke = grant.RevokesDefault && !graph.IsTargetNode(grant.Key);
+                if (changedGrantIds.Contains(grant.Key) || (!graph.IsTargetNode(grant.Key) && !keptRevoke) || !regranted.Add(grant.Key))
                 {
                     continue;
                 }
@@ -380,6 +531,7 @@ public sealed partial class ScriptGenerator
                     NodeId = grant.Key,
                     NodeKind = ChangeNodeKind.Grant,
                     Node = grant,
+                    IsRestored = true,
                 });
             }
 
@@ -623,6 +775,7 @@ public sealed partial class ScriptGenerator
                 NodeKind = modified.NodeKind,
                 Node = modified.NewNode,
                 PreviousComment = GetComment(modified.OldNode),
+                IsReplacedInPlace = true,
             });
 
             return;
@@ -932,13 +1085,27 @@ public sealed partial class ScriptGenerator
 
             // A publication is altered in place (ALTER PUBLICATION SET), except that FOR ALL TABLES cannot be altered into or out of, so that change is a drop and a create (G-134).
             ChangeNodeKind.Publication => modified.Details.Any(static detail => detail.PropertyName == nameof(PublicationDefinition.IsAllTables)),
+            // A foreign table cannot move to another server in place, nor become or stop being one: a drop and a create (G-133, the user's choice of 2026-11-10).
+            ChangeNodeKind.Table => modified.Details.Any(static detail => detail.PropertyName == nameof(TableDefinition.ForeignServer)),
+            // A server's wrapper and TYPE cannot be altered, so changing either is a drop and a create, its user mappings with it; the rest is altered in place (G-132).
+            ChangeNodeKind.ForeignServer => modified.Details.Any(static detail => detail.PropertyName is nameof(ForeignServerDefinition.Wrapper) or nameof(ForeignServerDefinition.ServerType)),
             // An extension is altered in place, never dropped and created again, which would drop every object it installed (G-46, G-213).
             ChangeNodeKind.Type => !(modified.NewNode is TypeDefinition extension && SqlOperation.IsExtension(extension))
                 && !IsChangeOnlyTo<TypeDefinition>(modified, nameof(TypeDefinition.Comment), nameof(TypeDefinition.ColumnComments))
                 && !IsAdditiveEnumChange(modified) && !IsCommentOnlyTypeChange(modified) && !IsAlterSafeDomainChange(modified)
-                && !IsAlterSafeCompositeChange(modified),
+                && !IsAlterSafeCompositeChange(modified) && !IsAlterSafeBaseTypeChange(modified),
             _ => false,
         };
+
+    /// <summary>
+    /// True when a base type's change (G-267, the user's design of 2026-11-09, item 3) is only to the options <c>ALTER TYPE ... SET</c> changes in place
+    /// (<see cref="BaseTypeOptionsDefinition.AlterableOptions"/>) and its comment; any other change drops the type and its support functions and creates them again.
+    /// </summary>
+    internal static bool IsAlterSafeBaseTypeChange(ModifiedChange modified)
+        => modified.OldNode is TypeDefinition { IsBaseType: true, BaseTypeOptions: { } oldOptions }
+            && modified.NewNode is TypeDefinition { IsBaseType: true, BaseTypeOptions: { } newOptions }
+            && modified.Details.All(static detail => detail.PropertyName is nameof(TypeDefinition.BaseTypeOptions) or nameof(TypeDefinition.Comment))
+            && oldOptions.DifferencesFrom(newOptions).All(BaseTypeOptionsDefinition.AlterableOptions.Contains);
 
     /// <summary>
     /// True when a modified domain's change can be deployed with in-place <c>ALTER DOMAIN</c> statements
@@ -1021,7 +1188,8 @@ public sealed partial class ScriptGenerator
 
         // Labels may be inserted anywhere (ADD VALUE ... BEFORE | AFTER), but none removed, renamed, or moved (G-183).
         // Both sides must be enums: an empty enum that becomes an empty composite has no labels to add either (G-268).
-        if (EnumLabelAdditions.Plan(oldType.EnumLabels, newType.EnumLabels) is null || (oldType.EnumLabels.Count == 0 && !oldType.IsEnum) || (newType.EnumLabels.Count == 0 && !newType.IsEnum))
+        // A label the project says was renamed (G-191: -- @renamed-label) is renamed in place first.
+        if (!EnumLabelAdditions.IsInPlace(oldType.EnumLabels, newType.EnumLabels, newType.EnumLabelRenames) || (oldType.EnumLabels.Count == 0 && !oldType.IsEnum) || (newType.EnumLabels.Count == 0 && !newType.IsEnum))
         {
             return false;
         }

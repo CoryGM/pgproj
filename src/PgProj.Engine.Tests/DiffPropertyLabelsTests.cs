@@ -20,6 +20,8 @@ public sealed class DiffPropertyLabelsTests
     [DataRow("Option:fillfactor", "Option fillfactor")]
     [DataRow("Mapping:asciiword", "Mapping asciiword")]
     [DataRow("Table:public.t:Columns", "Table public.t columns")]
+    [DataRow("ForeignServer", "Server")]
+    [DataRow("ForeignOptions", "Options")]
     public void APropertyIsNamedAsAUserKnowsIt(string propertyName, string label)
     {
         Assert.AreEqual(label, DiffPropertyLabels.For(propertyName));

@@ -21,6 +21,7 @@ public sealed partial class PgQueryParser
         switch (objType)
         {
             case "OBJECT_TABLE":
+            case "OBJECT_FOREIGN_TABLE":
             case "OBJECT_COLUMN":
             {
                 var qualifiedNameParts = TryGetQualifiedNameParts(element, "object");
@@ -29,7 +30,7 @@ public sealed partial class PgQueryParser
                     return null;
                 }
 
-                if (objType == "OBJECT_TABLE")
+                if (objType is "OBJECT_TABLE" or "OBJECT_FOREIGN_TABLE")
                 {
                     var tableName = qualifiedNameParts[^1];
                     var schemaName = qualifiedNameParts.Count >= 2 ? qualifiedNameParts[^2] : null;
@@ -108,6 +109,14 @@ public sealed partial class PgQueryParser
                 // `COMMENT ON EXTENSION name` (G-213): an extension has no schema; the node carries its name as TableName, as the other kinds carry theirs.
                 var extensionName = TryGetStringPropertyRecursive(element, "sval");
                 return string.IsNullOrWhiteSpace(extensionName) ? null : new ObjectCommentNode("Extension", null, extensionName, ColumnName: null, commentText);
+            }
+
+            case "OBJECT_FDW":
+            case "OBJECT_FOREIGN_SERVER":
+            {
+                // `COMMENT ON FOREIGN DATA WRAPPER w` and `COMMENT ON SERVER s` (G-132): no schema, the name as TableName.
+                var foreignName = TryGetStringPropertyRecursive(element, "sval");
+                return string.IsNullOrWhiteSpace(foreignName) ? null : new ObjectCommentNode(objType == "OBJECT_FDW" ? "ForeignDataWrapper" : "ForeignServer", null, foreignName, ColumnName: null, commentText);
             }
 
             case "OBJECT_TYPE":

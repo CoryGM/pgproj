@@ -39,6 +39,7 @@ public sealed partial class PgProjEngine
         var commentsOnly = request.CommentsOnly;
         var concurrently = request.Concurrently;
         var lockTimeout = request.LockTimeout?.Trim();
+        var variables = request.Variables ?? new Dictionary<string, string>();
         var sharedTrees = (IReadOnlyList<PgProj.Parser.SqlSyntaxTree>)[.. built.SyntaxTrees.Where(static tree => tree.SearchPath is null)];
         var serverMajor = connection.PostgreSqlVersion.Major;
         var relationNames = concurrently ? await PublishTexts.ReadRelationNamesAsync(connection, cancellationToken) : null;
@@ -60,7 +61,7 @@ public sealed partial class PgProjEngine
             connection, sharedModel, sharedScope, grants, memberships, (request.ExcludeOwners ?? project.ExcludeOwners) || sharedModel.Owners.Count == 0, LiveComparison.GetScopeExtensions(sharedModel), cancellationToken);
         var shared = PublishUnit.Build(
             project, SharedLabel, sharedModel, sharedLive, sharedChanges, DeployScripts.ForProject(project, sharedChanges), searchPath: null,
-            commentsOnly, concurrently, serverMajor, relationNames, untrustedLanguages, progress);
+            commentsOnly, concurrently, serverMajor, relationNames, untrustedLanguages, progress, commentsOnly ? null : request.ApplySecrets);
 
         var previousSearchPath = await TenantComparison.ReadSearchPathAsync(connection, cancellationToken);
         try
@@ -226,7 +227,7 @@ public sealed partial class PgProjEngine
 
                 try
                 {
-                    await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, cancellationToken);
+                    await ScriptExecution.ExecuteScriptAsync(connection, unit.TransactionalScript, lockTimeout, variables, cancellationToken);
                     if (unit.AfterCommit.Count > 0)
                     {
                         Say(progress, EngineEventKind.AfterCommitStarted, $"Running {unit.AfterCommit.Count} statement(s) of {PartName(unit)} outside the transaction (--concurrently):");
@@ -264,8 +265,55 @@ public sealed partial class PgProjEngine
         // The checks over the parts, in the order publish has always made them; false when one refuses.
         async Task<bool> CheckAllAsync(IReadOnlyList<PublishUnit> units, List<PublishNotice> warnings, List<PublishNotice> refusals)
             => WarnAndCheck(units, warnings, refusals)
+                && CheckVariables(units, warnings, refusals)
+                && CheckSecrets(warnings, refusals)
                 && await CheckServerAsync(units, warnings, refusals)
                 && await CheckSuperuserAsync(units, warnings, refusals);
+
+        // --apply-secrets names no user mapping uses (G-347); the mappings are the shared part's.
+        bool CheckSecrets(List<PublishNotice> warnings, List<PublishNotice> refusals)
+        {
+            var unknown = commentsOnly ? [] : PublishTexts.UnknownSecrets(request.ApplySecrets, sharedModel);
+            if (unknown.Count == 0)
+            {
+                return true;
+            }
+
+            var notice = new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeUnknownSecrets(unknown, PublishTexts.SecretVariables(sharedModel), executing), []);
+            if (!executing)
+            {
+                Warn(warnings, progress, notice);
+                return true;
+            }
+
+            refusals.Add(notice);
+            return false;
+        }
+
+        // The scripts' variables over every part (G-336): a kept script keeps them; --execute needs a value for each, or nothing runs.
+        bool CheckVariables(IReadOnlyList<PublishUnit> units, List<PublishNotice> warnings, List<PublishNotice> refusals)
+        {
+            var used = PublishTexts.VariablesUsed(units.Select(static unit => unit.TransactionalScript));
+            if (used.Count == 0)
+            {
+                return true;
+            }
+
+            if (!executing)
+            {
+                Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesKept(used), [], ForKeptScript: true));
+                return true;
+            }
+
+            var missing = used.Where(name => !variables.ContainsKey(name)).ToArray();
+            if (missing.Length == 0)
+            {
+                return true;
+            }
+
+            refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesMissing(missing), []));
+            return false;
+        }
 
         // The script: the shared part, then each tenant with changes under a line naming it; with a lock timeout, starting with its SET.
         string ComposeScript(IReadOnlyList<PublishUnit> parts, string? timeout, List<PublishNotice> warnings)
@@ -297,6 +345,17 @@ public sealed partial class PgProjEngine
                 if (lockWarnings.Count > 0)
                 {
                     Warn(warnings, progress, new PublishNotice(PublishNoticeKind.LockRewrite, $"In {PartName(unit)}: " + LockWarnings.Describe(lockWarnings), PublishItems.LockRewrites(lockWarnings, unit.Label), unit.Label));
+                }
+
+                // A privilege given to PUBLIC that it does not have now (G-337, G-338).
+                var publicGrants = commentsOnly ? [] : PublicGrants.Find(unit.Transactional, unit.LiveModel);
+                if (publicGrants.Count > 0)
+                {
+                    Warn(warnings, progress, new PublishNotice(
+                        PublishNoticeKind.PublicGrant,
+                        $"In {PartName(unit)}: " + PublicGrants.Describe(publicGrants),
+                        [.. publicGrants.Select(grant => new PublishItem(PublishNoticeKind.PublicGrant, grant.Statement, PgProj.Diff.ChangeNodeKind.Grant, Part: unit.Label))],
+                        unit.Label));
                 }
             }
 

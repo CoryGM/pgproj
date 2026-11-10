@@ -29,6 +29,7 @@ public sealed class DependencyAnalyzer
         graph.TargetNodeIds = newModel.GetAllNodes().Select(static node => node.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         graph.ReplacedUnmodeledPrivileges = oldModel.UnmodeledPrivileges;
         graph.ReplacedDependencies = oldModel.LiveDependencies;
+        graph.ReplacedTables = oldModel.Tables;
         graph.ReplacedOwners = oldModel.LiveOwners;
         graph.ReplacedConnectedRole = oldModel.ConnectedRole;
         graph.ReplacedComments = oldModel.Constraints.Values
@@ -233,6 +234,12 @@ public sealed class DependencyAnalyzer
                 // already populates these on the table, so consume them here (G-08).
                 AddTableDependencies(model, table.SchemaName, table.ReferencedTables, dependencyIds);
                 AddFunctionDependencies(model, table.SchemaName, table.ReferencedFunctions, dependencyIds);
+
+                // A foreign table after its server (G-133).
+                if (table.ForeignServer is { } foreignServer && model.ForeignServers.ContainsKey(ForeignDataKeys.Server(foreignServer)))
+                {
+                    dependencyIds.Add(ForeignDataKeys.Server(foreignServer));
+                }
                 AddOperatorDependencies(model, table.Columns.SelectMany(static column => column.ReferencedOperators), dependencyIds);
                 AddCollationDependencies(model, table.SchemaName, table.Columns.Select(static column => column.CollationName), dependencyIds);
                 AddLikeDependencies(model, table, dependencyIds);
@@ -266,7 +273,31 @@ public sealed class DependencyAnalyzer
                 AddBodySequenceDependencies(model, function.SchemaName, function.Language, function.RawBody, dependencyIds);
                 AddDeclaredVariableDependencies(model, function.SchemaName, function.Language, function.RawBody, dependencyIds);
 
+                // A base type's support function is created before the type, which needs it, while a shell stands in for the type (G-267): the type and its
+                // functions refer to each other, and the edge from the function is the one that goes.
+                foreach (var baseType in BaseTypesSupportedBy(model, function))
+                {
+                    dependencyIds.Remove(baseType.Key);
+                }
+
                 // TODO: Add deeper function dependency extraction for argument types.
+                break;
+
+            // A server after its wrapper: the project's own, or the extension that installs it (postgres_fdw); a user mapping after its server (G-132).
+            case ForeignServerDefinition server:
+                if (model.ForeignDataWrappers.ContainsKey(ForeignDataKeys.Wrapper(server.Wrapper)))
+                {
+                    dependencyIds.Add(ForeignDataKeys.Wrapper(server.Wrapper));
+                }
+                else if (model.Types.ContainsKey(ExtensionKeys.Create(server.Wrapper)))
+                {
+                    dependencyIds.Add(ExtensionKeys.Create(server.Wrapper));
+                }
+
+                break;
+
+            case UserMappingDefinition mapping:
+                dependencyIds.Add(ForeignDataKeys.Server(mapping.Server));
                 break;
 
             case ProcedureDefinition procedure:
@@ -361,6 +392,7 @@ public sealed class DependencyAnalyzer
 
         AddTextSearchConfigurationDependencies(model, semanticNode, dependencyIds);
         AddExpressionSequenceDependencies(model, semanticNode, dependencyIds);
+        AddDefaultPrivilegeDependencies(model, semanticNode, dependencyIds);
 
         // A view, or a SQL-language routine body, that reads another view needs that view first; PostgreSQL resolves both at CREATE (G-90, G-91).
         var referencedViews = semanticNode switch
@@ -390,6 +422,51 @@ public sealed class DependencyAnalyzer
     /// the same publish came after the grant and was never granted anything. Other grants (on the schema itself, or default
     /// privileges, which apply to objects created later) name no existing object and get no edges.
     /// </summary>
+    /// <summary>The default-privilege rules of each model, by the kind of object they cover (G-339), read once per model.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DatabaseModel, ILookup<string, GrantDefinition>> DefaultPrivilegeRules = new();
+
+    /// <summary>
+    /// An object a default-privilege rule covers (<c>ALTER DEFAULT PRIVILEGES [IN SCHEMA s] GRANT ... ON TABLES|SEQUENCES|FUNCTIONS|TYPES</c>, global or in the
+    /// object's schema) is created after the rule (G-339, the user's decision of 2026-11-09), so it gets what the rule gives, as running the project's SQL on an
+    /// empty database would. A rule applies only to what is created after it.
+    /// </summary>
+    private static void AddDefaultPrivilegeDependencies(DatabaseModel model, ISemanticNode semanticNode, ISet<string> dependencyIds)
+    {
+        var kind = semanticNode switch
+        {
+            TableDefinition or ViewDefinition => "tables",
+            SequenceDefinition => "sequences",
+            FunctionDefinition or ProcedureDefinition or AggregateDefinition => "functions",
+            TypeDefinition type when !string.Equals(type.TypeKind, "extension", StringComparison.OrdinalIgnoreCase) => "types",
+            _ => null,
+        };
+        if (kind is null)
+        {
+            return;
+        }
+
+        var rules = DefaultPrivilegeRules.GetValue(model, static rulesModel => rulesModel.Grants.Values
+            .Where(static grant => grant.ObjectKey?.StartsWith("default ", StringComparison.Ordinal) == true)
+            .ToLookup(static grant => GrantExpansion.DefaultPrivilegeKind(grant.ObjectKey!), StringComparer.Ordinal));
+        foreach (var rule in rules[kind])
+        {
+            if (rule.SchemaName is null || string.Equals(rule.SchemaName, semanticNode.SchemaName, StringComparison.Ordinal))
+            {
+                dependencyIds.Add(rule.Key);
+            }
+        }
+    }
+
+    /// <summary>The base types of <paramref name="model"/> that name <paramref name="function"/> as one of their support functions (G-267).</summary>
+    public static IEnumerable<TypeDefinition> BaseTypesSupportedBy(DatabaseModel model, FunctionDefinition function)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(function);
+
+        var name = $"{function.SchemaName ?? "public"}.{function.Name}";
+        return model.Types.Values.Where(type => type.BaseTypeOptions?.Functions.Values.Contains(name, StringComparer.Ordinal) == true);
+    }
+
     private static void AddGrantedObjectDependencies(DatabaseModel model, GrantDefinition grant, ISet<string> dependencyIds)
     {
         AddGrantedObjectDependenciesCore(model, grant, dependencyIds);
@@ -437,6 +514,14 @@ public sealed class DependencyAnalyzer
                 dependencyIds.Add(function.Key);
             }
         }
+        else if (objectKey.StartsWith("foreign data wrapper:", StringComparison.Ordinal) || objectKey.StartsWith("server:", StringComparison.Ordinal))
+        {
+            // A grant on a foreign data wrapper or server comes after it (G-132); the node is keyed as the grant names it.
+            if (model.ForeignDataWrappers.ContainsKey(objectKey) || model.ForeignServers.ContainsKey(objectKey))
+            {
+                dependencyIds.Add(objectKey);
+            }
+        }
         else if (grant.ObjectName is { } objectName)
         {
             // A grant on one named object (or on columns of one table) comes after that object (G-65).
@@ -476,6 +561,14 @@ public sealed class DependencyAnalyzer
                 foreach (var procedure in model.Procedures.Values.Where(procedure => Named(procedure.SchemaName, GrantExpansion.RoutineObjectName(procedure))))
                 {
                     dependencyIds.Add(procedure.Key);
+                }
+            }
+            else if (objectKey.StartsWith("type:", StringComparison.OrdinalIgnoreCase))
+            {
+                // A type or a domain (G-337), and a revoked default on one: after it, and given again when it is dropped and created.
+                foreach (var type in model.Types.Values.Where(type => Named(type.SchemaName, type.Name)))
+                {
+                    dependencyIds.Add(type.Key);
                 }
             }
         }

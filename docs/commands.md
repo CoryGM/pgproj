@@ -30,13 +30,18 @@ Scaffolds a new project from an existing database: a `pgproj.json` and one SQL f
 
 Files go in Title Case folders under the output directory:
 
-- `Schema/<schema>/<schema>.sql` for the schema itself, with its grants and default privileges.
+- `Schema/<schema>/<schema>.sql` for the schema itself, with its grants and default privileges. A privilege a role holds on every table (views and
+  foreign tables included), every sequence, or every function of the schema is written here once, as `GRANT ... ON ALL TABLES|SEQUENCES|FUNCTIONS IN
+  SCHEMA`, rather than in each object's file.
 - `Schema/<schema>/Table/<table>.sql` for a table, with its constraints, indexes, triggers, row-level security policies, rules, extended
-  statistics, and grants.
+  statistics, and grants (but for a grant written once for the whole schema, above).
+- `Schema/<schema>/ForeignTable/<table>.sql` for a foreign table, the same way ([foreign data](notes/foreign-data.md#foreign-tables)).
 - `Schema/<schema>/View/`, `Function/`, `Procedure/`, `Sequence/`, `Type/`, `Collation/`, `Aggregate/`, `Operator/`,
   `TextSearchDictionary/`, and `TextSearchConfiguration/` for the other kinds in a schema. A materialized view's indexes, and a view's
-  rules, are in the view's file.
-- `Extension/`, `EventTrigger/`, `Cast/`, and `Publication/` at the top, for what belongs to no schema. An extension that requires others is
+  rules, are in the view's file; a type's, domain's, function's, or procedure's privileges in its own ([type privileges](notes/type-privileges.md), [routine
+  privileges](notes/routine-privileges.md)).
+- `Extension/`, `EventTrigger/`, `Cast/`, `Publication/`, `ForeignDataWrapper/`, and `Server/` (a server with its user mappings) at the top, for what belongs
+  to no schema. An extension that requires others is
   written after them, in the file of the one that sorts last ([extensions](notes/extensions.md)).
 
 Each object's owner is written beside it as `ALTER ... OWNER TO` (a sequence owned by a column has none; it follows its table). The
@@ -98,11 +103,10 @@ Not read by pgproj, so absent from the scaffolded project even if the database h
   - roles and their settings (role memberships are scaffolded)
   - text search parsers and templates (a text search configuration and a dictionary are scaffolded)
   - tablespaces (a table's TABLESPACE clause is scaffolded)
-  - foreign data wrappers, servers, user mappings, and foreign tables
   - subscriptions
   - operator classes and families
   - conversions
-  - base types (CREATE TYPE with INPUT and OUTPUT functions), with their input and output functions
+  - shell types with no definition (a base type is scaffolded, with its functions)
   - languages
   - transforms
   - access methods
@@ -116,7 +120,7 @@ Run 'pgproj build' to validate the scaffolded project.
 
 The list of kinds pgproj does not read is also in `pgproj init --help`; `--quiet` leaves it out of the output. Everything else a database
 can hold is scaffolded, including event triggers, casts, operators, aggregates, collations, text search dictionaries and
-configurations, publications, rules, and extended statistics. See [What is supported](notes/supported-objects.md). A base type is left out with its input and output functions, and `init` names it ([base types](notes/base-types.md)). An index PostgreSQL marks `INVALID` (left by a failed `CREATE INDEX CONCURRENTLY`) is left out, as `pg_dump` leaves it out, and `init` names it.
+configurations, publications, rules, extended statistics, foreign data wrappers, servers and user mappings, and foreign tables (in `Schema/<schema>/ForeignTable/`). See [What is supported](notes/supported-objects.md). A base type is written with its shell and its support functions in its own file ([base types](notes/base-types.md)); a shell left without a definition is left out, and `init` names it. An index PostgreSQL marks `INVALID` (left by a failed `CREATE INDEX CONCURRENTLY`) is left out, as `pg_dump` leaves it out, and `init` names it.
 
 #### The report
 
@@ -130,8 +134,8 @@ Markdown, not SQL, so `build` ignores it. It starts with a contents list and has
 - **Modeled objects** - a table per schema, by type then name, with the file each object is in. Indexes, constraints, triggers,
   policies, rules, and extended statistics are listed too; grants, owners, and comments are not (they are in their object's file).
 - **Not modeled: not supported** - the kinds pgproj cannot read, and the objects of those kinds it found: in the scaffolded schemas (a
-  foreign table, a text search parser or template, an operator class or family, a conversion, a base or shell type) and in the database (a foreign data
-  wrapper, server, or user mapping, a language, a transform, an access method).
+  text search parser or template, an operator class or family, a conversion, a shell type) and in the database (a language, a transform,
+  an access method).
 - **Not modeled: excluded** - the schemas left out and the files that refer to them, and how many grants, memberships, or owners each
   `--exclude-*` option left out. References are found by looking for `schema.` in the SQL, and PostgreSQL writes names in `public`
   without the schema, so a reference into an excluded `public` is not found.
@@ -255,13 +259,27 @@ and an object in the way of a change (a view on a column whose type changes, say
   relation it changes locked until it commits, and PostgreSQL would fail partway with `out of shared memory`. See [Locks and large tables](notes/locks.md).
 - **Statements only a superuser can run are refused** unless you add `--allow-superuser-statements` and connect as a superuser. See
   [Statements only a superuser can run](notes/superuser-statements.md).
-- **A printed or written script is not wrapped in a transaction**, and `publish` warns so. Run it inside one yourself
-  (`psql --single-transaction -f deploy.sql`), or use `--execute`.
+- **A printed or written script carries its transaction:** it starts with `BEGIN;` and ends with `COMMIT;` (a `SET lock_timeout` from `--lock-timeout`
+  comes before the `BEGIN`), so `psql -f deploy.sql` applies all of it or, when a statement fails, none of it, as `--execute` does. Do not add psql's
+  `--single-transaction`. The `--concurrently` statements come after the `COMMIT`, and a project with tenants has a transaction per part: for those,
+  `publish` warns and advises `psql -v ON_ERROR_STOP=1 -f deploy.sql`, so psql stops at the first error.
+- **A pre- or post-deploy script runs inside that transaction,** so `build` reports, at its line, a statement that would break it: one that ends the
+  transaction (`COMMIT`, `END`, `ROLLBACK`, `ABORT`, `PREPARE TRANSACTION`) and one PostgreSQL refuses inside a transaction (`VACUUM`,
+  `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, `ALTER SYSTEM`, ...) are errors, which stop `publish`; a `BEGIN` is a warning. A savepoint is fine.
+- **The deploy scripts can name a value instead of writing it:** `:'name'` or `:"name"`, psql's syntax, for a password or a value per environment.
+  `--execute` takes it from the environment variable `PGPROJ_VAR_<name>`, only in what it runs, and refuses to run when one is not set; the value is
+  never printed and is masked in an error. A printed or written script keeps the variables, and `publish` names them: run it with
+  `psql -v name=value -f deploy.sql`. See [Variables in the deploy scripts](notes/variables.md).
 - **A project with tenants is published in parts:** the shared changes in one transaction, then each tenant in a transaction of its own, a new tenant's
   schema created first; every part is checked before anything runs, and a failure stops the run and says what was published (see
   [Schema-per-tenant databases](notes/tenants.md#deploying-publish)).
 - **A drop of something a PL/pgSQL body names is noted.** PostgreSQL records no dependency for such a body, so it does not stop a table, view, function, or qualified column that a
   routine's body uses from being dropped, renamed, or retyped, and the routine fails when it runs. `diff` and `publish` say which routine names what ([PL/pgSQL bodies](notes/plpgsql-bodies.md)).
+- **A privilege given to `PUBLIC` is spelled out.** Before anything runs, a warning lists each statement that gives `PUBLIC` (every role, including roles
+  created later) a privilege it does not have now, what every role can then do, and the `REVOKE` that keeps it revoked: PostgreSQL's default given back to a
+  type, domain, function, procedure, or the `public` schema the database has it revoked on, because the project does not revoke it (a `SECURITY DEFINER` routine is marked); a
+  default-privileges rule that revokes it the project removes; and a grant to `PUBLIC` the project adds on an object that exists. It takes nothing away, so
+  `--allow-destructive` does not cover it ([routine privileges](notes/routine-privileges.md), [type privileges](notes/type-privileges.md)).
 - **Schemas are never dropped.** A schema the project no longer uses is left in place (its objects are dropped as usual), and `diff` and
   `publish` warn and name it. Drop it yourself if you no longer want it (see [Schemas](notes/schemas.md)).
 
@@ -276,14 +294,19 @@ Options:
   the mode on.
 - `--dry-run` - print the script without running it, even with `--execute`.
 - `--output <file>` - write the script to a file.
-- `--allow-destructive` - let `--execute` run a script that can discard data or access (a dropped table, column, materialized view,
+- `--allow-destructive` - let `--execute` run a script that can discard data or access (a dropped table (a foreign table too), column, materialized view,
   extension, or composite type field; a changed column type that can lose a value, so not a widening such as `varchar(50)` to
-  `varchar(100)` or `int` to `bigint`; a cast, operator, aggregate, rule, publication, or event trigger that is dropped and not created
-  again; a revoked grant or role membership; or a changed owner). Without it, `--execute` refuses such a script and lists the operations.
+  `varchar(100)` or `int` to `bigint`; a label removed from an enum type that columns use; a field of a composite type that columns use
+  changed to a type that can lose a value; a cast, operator, aggregate, rule, publication, event trigger, foreign server, or user mapping that is
+  dropped and not created again; a revoked grant or role membership; or a changed owner). Without it, `--execute` refuses such a script and lists the operations.
 - `--allow-superuser-statements` - let `--execute` run statements only a superuser can run: an event trigger created, changed, or dropped, a table's foreign-key triggers enabled or disabled (`ALTER TABLE ... TRIGGER ALL`),
-  and a function or procedure created or replaced `LEAKPROOF` or in an untrusted language (`c`, `internal`, `plpython3u`, ...). Without it,
+  a function or procedure created or replaced `LEAKPROOF` or in an untrusted language (`c`, `internal`, `plpython3u`, ...), and a base type or its shell created, or its options changed with `ALTER TYPE ... SET`. Without it,
   `--execute` refuses such a script, even for a superuser; with it, a role that is not a superuser is refused before anything runs (see
   [Statements only a superuser can run](notes/superuser-statements.md)).
+- `--apply-secrets [names]` - send the secrets of user mappings that already exist again, for a password that changed in `PGPROJ_VAR_<name>`: every variable the
+  project's user mappings name, or only those listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is
+  created. Each is an `ALTER USER MAPPING ... OPTIONS (SET password :'name')` in the script, filled in only by `--execute` ([foreign data](notes/foreign-data.md)).
+  A name no user mapping's options use (a typo) is refused before anything runs, naming the variables the mappings do use.
 - `--allow-lock-limit` - let `--execute` run a script estimated to need more locks than the server's lock table holds
   (`max_locks_per_transaction * (max_connections + max_prepared_transactions)`). Without it, `--execute` refuses such a script; from 80% of the table,
   `publish` warns.

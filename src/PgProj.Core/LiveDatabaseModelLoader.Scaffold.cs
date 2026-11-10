@@ -83,15 +83,16 @@ public sealed partial class LiveDatabaseModelLoader
             var statistics = await ReadStatisticsAsync(connection, scope, cancellationToken);
             var textSearch = await ReadTextSearchAsync(connection, scope, cancellationToken);
             var publications = await ReadPublicationsAsync(connection, scope, cancellationToken);
-            var allGrants = await ReadGrantsAsync(connection, scope, cancellationToken);
+            var foreignData = await ReadForeignDataAsync(connection, cancellationToken);
+            var allGrants = WithoutServerDefaultRevokes(await ReadGrantsAsync(connection, scope, cancellationToken), connection.PostgreSqlVersion.Major);
             var grants = FilterGrantsForScaffold(allGrants, options.ExcludeGrants, options.ExcludeRoleMemberships);
 
             // Owners are always read, for the report (who owns what was modeled, and how many an option left out); they go into the files unless excluded.
-            var allOwners = BuildOwnerSnapshots(await ReadOwnerRowsAsync(connection, cancellationToken), schemas, tables, views, sequences, functions, types, operators, aggregates, eventTriggers, publications, collations, statistics, textSearch);
+            var allOwners = BuildOwnerSnapshots(await ReadOwnerRowsAsync(connection, cancellationToken), schemas, tables, views, sequences, functions, types, operators, aggregates, eventTriggers, publications, collations, statistics, textSearch, foreignData);
             var owners = options.ExcludeOwners ? [] : allOwners;
 
             var modeled = new List<ScaffoldedObject>();
-            var files = BuildScaffoldFiles(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch, modeled, options.CaseSensitivePaths);
+            var files = BuildScaffoldFiles(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch, modeled, options.CaseSensitivePaths, foreignData);
 
             // A file pgproj cannot parse would give the new project a build that fails, or leave the object out (G-121): refuse instead.
             var unparseable = FindUnparseableFiles(files);
@@ -158,21 +159,15 @@ public sealed partial class LiveDatabaseModelLoader
     }
 
     /// <summary>
-    /// What the database has in the scaffolded schemas that pgproj cannot read (a foreign table, a text search parser or template, an operator class or family, a conversion,
+    /// What the database has in the scaffolded schemas that pgproj cannot read (a text search parser or template, an operator class or family, a conversion,
     /// a base or shell type),
-    /// and what belongs to no schema and is not read either (a foreign data wrapper, server, or user mapping, a language, a transform, an access method). The system's own
+    /// and what belongs to no schema and is not read either (a language, a transform, an access method; foreign data wrappers, servers, and user mappings are read since G-132). The system's own
     /// (OIDs below 16384) and an extension's are left out.
     /// </summary>
     private static async Task<IReadOnlyList<UnsupportedObject>> ReadUnsupportedObjectsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
     {
         const string unsupportedSql =
             """
-            select n.nspname, 'Foreign table', c.relname
-            from pg_catalog.pg_class c
-            inner join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-            where c.relkind = 'f' and (@schemas is null or n.nspname = any(@schemas))
-              and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_class'::regclass and d.objid = c.oid and d.deptype = 'e')
-            union all
             select n.nspname, 'Text search parser', p.prsname
             from pg_catalog.pg_ts_parser p
             inner join pg_catalog.pg_namespace n on n.oid = p.prsnamespace
@@ -203,24 +198,13 @@ public sealed partial class LiveDatabaseModelLoader
             where c.oid >= 16384 and (@schemas is null or n.nspname = any(@schemas))
               and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_conversion'::regclass and d.objid = c.oid and d.deptype = 'e')
             union all
-            -- A base type, or a shell type left without a definition (G-241); an array type PostgreSQL made for one is not listed.
-            select n.nspname, case t.typtype when 'b' then 'Base type' else 'Shell type' end, t.typname
+            -- A shell type left without a definition (G-241); a base type is scaffolded since G-267.
+            select n.nspname, 'Shell type', t.typname
             from pg_catalog.pg_type t
             inner join pg_catalog.pg_namespace n on n.oid = t.typnamespace
-            where t.oid >= 16384 and (t.typtype = 'b' or (t.typtype = 'p' and not t.typisdefined))
-              and not exists (select 1 from pg_catalog.pg_type element where element.typarray = t.oid)
+            where t.oid >= 16384 and t.typtype = 'p' and not t.typisdefined
               and (@schemas is null or n.nspname = any(@schemas))
               and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_type'::regclass and d.objid = t.oid and d.deptype = 'e')
-            union all
-            select null, 'Foreign data wrapper', w.fdwname
-            from pg_catalog.pg_foreign_data_wrapper w
-            where not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_foreign_data_wrapper'::regclass and d.objid = w.oid and d.deptype = 'e')
-            union all
-            select null, 'Foreign server', s.srvname
-            from pg_catalog.pg_foreign_server s
-            union all
-            select null, 'User mapping', m.srvname || ' for ' || m.usename
-            from pg_catalog.pg_user_mappings m
             union all
             select null, 'Language', l.lanname
             from pg_catalog.pg_language l
@@ -318,6 +302,16 @@ public sealed partial class LiveDatabaseModelLoader
     }
 
     /// <summary>
+    /// The revokes that only restate the server's own default, which a new project does not need (G-341): from PostgreSQL 15, <c>PUBLIC</c> has no <c>CREATE</c> on
+    /// the <c>public</c> schema, so every such database reads as <c>REVOKE CREATE ON SCHEMA public FROM PUBLIC</c>, which <c>init</c> leaves out. On 14 it is a
+    /// revoke someone made, and is written.
+    /// </summary>
+    internal static IReadOnlyList<LiveGrantSnapshot> WithoutServerDefaultRevokes(IReadOnlyList<LiveGrantSnapshot> grants, int serverMajorVersion)
+        => serverMajorVersion < 15
+            ? grants
+            : grants.Where(static grant => !(grant.ObjectKey == "schema:public" && grant.Statement.StartsWith("REVOKE CREATE ", StringComparison.Ordinal))).ToArray();
+
+    /// <summary>
     /// G-87: applied after the read (not by skipping the query above) so the read stays identical to
     /// <see cref="LoadAsync"/>'s, and the exclusion rule — a <c>role:</c>-prefixed <see
     /// cref="LiveGrantSnapshot.ObjectKey"/> is role membership, everything else is a grant — lives in one place per
@@ -354,7 +348,8 @@ public sealed partial class LiveDatabaseModelLoader
         IReadOnlyList<LiveStatisticsSnapshot>? statistics = null,
         LiveTextSearchSnapshot? textSearch = null,
         List<ScaffoldedObject>? modeled = null,
-        bool caseSensitivePaths = false)
+        bool caseSensitivePaths = false,
+        LiveForeignDataSnapshot? foreignData = null)
     {
         // Two paths are one file when the file system the files are written to says so (G-212).
         var pathComparer = caseSensitivePaths ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
@@ -432,14 +427,29 @@ public sealed partial class LiveDatabaseModelLoader
             }
         }
 
+        var supportFunctionsWritten = new HashSet<LiveFunctionSnapshot>();
         foreach (var type in types.Where(static type => !type.IsExtension).OrderBy(static type => type.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static type => type.TypeName, StringComparer.OrdinalIgnoreCase))
         {
             var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(type.SchemaName)}/Type/{SanitizeSegment(type.TypeName)}.sql", usedPaths);
 
             var builder = GetOrCreateFile(relativePath);
+
+            // A base type's file holds its shell, its support functions, and its definition, in the order they run (G-267, item 6), as pg_dump writes them.
+            if (type.IsBaseType)
+            {
+                builder.Append("CREATE TYPE ").Append(QualifyIdentifier(type.SchemaName, type.TypeName)).AppendLine(";");
+                foreach (var function in functions.Where(function => type.SupportFunctions.Contains($"{function.SchemaName}.{function.FunctionName}({function.IdentityArguments})", StringComparer.Ordinal)))
+                {
+                    AppendFunction(builder, function, relativePath);
+                    supportFunctionsWritten.Add(function);
+                }
+            }
+
             builder.Append(type.Statement.Trim().TrimEnd(';')).AppendLine(";");
             pathByOwnerKey[OwnerKey("type", type.SchemaName, type.TypeName, string.Empty)] = relativePath;
             pathByOwnerKey[OwnerKey("domain", type.SchemaName, type.TypeName, string.Empty)] = relativePath;
+            // Its privileges are written beside it (G-337).
+            pathByObjectKey[$"type:{type.SchemaName}.{type.TypeName}()"] = relativePath;
             Record(type.SchemaName, string.Equals(type.TypeKind, "domain", StringComparison.OrdinalIgnoreCase) ? "Domain" : "Type", type.TypeName, relativePath);
             if (!string.IsNullOrEmpty(type.Comment))
             {
@@ -463,11 +473,12 @@ public sealed partial class LiveDatabaseModelLoader
 
         foreach (var table in tables.OrderBy(static table => table.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static table => table.TableName, StringComparer.OrdinalIgnoreCase))
         {
-            var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(table.SchemaName)}/Table/{SanitizeSegment(table.TableName)}.sql", usedPaths);
+            // A foreign table (G-133) in a folder of its own, with what belongs to it as for a table.
+            var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(table.SchemaName)}/{(table.ForeignServer is null ? "Table" : "ForeignTable")}/{SanitizeSegment(table.TableName)}.sql", usedPaths);
             GetOrCreateFile(relativePath).AppendLine(BuildCreateTableStatement(table, scaffold: true));
             pathByObjectKey[$"table:{table.SchemaName}.{table.TableName}()"] = relativePath;
             pathByOwnerKey[OwnerKey("table", table.SchemaName, table.TableName, string.Empty)] = relativePath;
-            Record(table.SchemaName, "Table", table.TableName, relativePath);
+            Record(table.SchemaName, table.ForeignServer is null ? "Table" : "Foreign table", table.TableName, relativePath);
         }
 
         foreach (var constraint in constraints.OrderBy(static constraint => constraint.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static constraint => constraint.TableName, StringComparer.OrdinalIgnoreCase).ThenBy(static constraint => constraint.ConstraintName, StringComparer.OrdinalIgnoreCase))
@@ -743,11 +754,42 @@ public sealed partial class LiveDatabaseModelLoader
             Record(null, "Publication", publication.Name, relativePath);
         }
 
-        foreach (var function in functions.OrderBy(static function => function.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.FunctionName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.IdentityArguments, StringComparer.OrdinalIgnoreCase))
+        // A foreign data wrapper of the database's own, and a server with its user mappings, a file each (G-132); their grants and owners go in the same file.
+        foreach (var wrapper in (foreignData ?? LiveForeignDataSnapshot.Empty).Wrappers)
+        {
+            var relativePath = MakeUniquePath($"ForeignDataWrapper/{SanitizeSegment(wrapper.Name)}.sql", usedPaths);
+            GetOrCreateFile(relativePath).AppendLine(BuildCreateForeignDataWrapperStatement(wrapper));
+            pathByObjectKey[PgProj.Semantics.ForeignDataKeys.Wrapper(wrapper.Name)] = relativePath;
+            pathByOwnerKey[OwnerKey("foreign data wrapper", null, wrapper.Name, string.Empty)] = relativePath;
+            Record(null, "Foreign data wrapper", wrapper.Name, relativePath);
+        }
+
+        foreach (var server in (foreignData ?? LiveForeignDataSnapshot.Empty).Servers)
+        {
+            var relativePath = MakeUniquePath($"Server/{SanitizeSegment(server.Name)}.sql", usedPaths);
+            var builder = GetOrCreateFile(relativePath).AppendLine(BuildCreateServerStatement(server));
+            foreach (var mapping in foreignData!.Mappings.Where(mapping => mapping.Server == server.Name))
+            {
+                builder.AppendLine(BuildCreateUserMappingStatement(mapping, scaffold: true));
+                Record(null, "User mapping", $"{mapping.Role} on {mapping.Server}", relativePath);
+            }
+
+            pathByObjectKey[PgProj.Semantics.ForeignDataKeys.Server(server.Name)] = relativePath;
+            pathByOwnerKey[OwnerKey("server", null, server.Name, string.Empty)] = relativePath;
+            Record(null, "Server", server.Name, relativePath);
+        }
+
+        // A base type's support functions are already in its file.
+        foreach (var function in functions.Where(function => !supportFunctionsWritten.Contains(function)).OrderBy(static function => function.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.FunctionName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.IdentityArguments, StringComparer.OrdinalIgnoreCase))
         {
             var kindFolder = function.IsProcedure ? "Procedure" : "Function";
             var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(function.SchemaName)}/{kindFolder}/{SanitizeSegment(function.FunctionName)}.sql", usedPaths);
-            var builder = GetOrCreateFile(relativePath);
+            AppendFunction(GetOrCreateFile(relativePath), function, relativePath);
+        }
+
+        // A function's definition and comment, and where its grants and owner go.
+        void AppendFunction(StringBuilder builder, LiveFunctionSnapshot function, string relativePath)
+        {
             builder.Append(function.FunctionDefinition.Trim().TrimEnd(';')).AppendLine(";");
             if (!string.IsNullOrEmpty(function.Comment))
             {

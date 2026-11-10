@@ -209,6 +209,10 @@ diagnostics there, so they appear before a slow live read.
 `PublishAsync` is what `pgproj publish` does, in one of two modes. `PublishMode.Plan` (the default) builds, compares, writes the script, and runs every check,
 and changes nothing: what `--dry-run` and `--output` do. `PublishMode.Execute` does the same and then runs the script, as `--execute` does.
 
+`PublishResult.Script`, and each part's `Script`, is the script as `pgproj publish` prints and writes it: each transaction between `BEGIN;` and `COMMIT;`,
+so it can be run as it is (`psql -f`). A program that runs a part in a transaction it opens itself uses the part's `TransactionalScript`, which has no
+`BEGIN` or `COMMIT`, and then its `AfterCommit` steps, outside a transaction, one at a time.
+
 ```csharp
 var engine = new PgProjEngine();
 var plan = await engine.PublishAsync(
@@ -246,6 +250,16 @@ differ from what was shown.
 **Consents.** What the command line asks an option for, the request asks a property for, and without it `Execute` refuses before anything runs:
 `AllowDestructive` (a change that can lose data or access), `AllowSuperuserStatements`, `AllowLockLimit`. `CommentsOnly`, `Concurrently`, `LockTimeout`, and
 `Tenants` are the other options of `publish`.
+
+**Variables.** `Variables` holds the values of the deploy scripts' variables (`:'name'`, `:"name"`), by name; the CLI reads them from `PGPROJ_VAR_<name>`, and
+a program passes its own (from a secret store, say). Only `Execute` fills them in, in what it sends: the `Script`, each part's scripts, the events, and the
+messages keep the placeholders, and a value the server quotes in an error is masked as `*****`. `Execute` refuses, with a `Variables` notice, when a
+variable has no value; a `Plan` warns, with the same kind, which variables a kept script needs. `tenant_schema` and `tenant_id` cannot be given
+([Variables in the deploy scripts](notes/variables.md)).
+
+**Secrets of user mappings.** A foreign server's or user mapping's option may name its value with a variable too, sent when the mapping is created.
+`ApplySecrets` sends the values again to mappings that exist: null (the default) for none, empty for every variable their options name, or the names to
+ send ([Foreign data](notes/foreign-data.md)).
 
 A `PublishResult` has the compare part (`Compare`), one `PublishPart` per transaction (the whole project, or the shared schemas and each tenant), the `Script` as
 `publish` prints it, the `Warnings` and `Refusals` (each a `PublishNotice` with a `Kind`, such as `Destructive`, `Superuser`, `LockRewrite`, or

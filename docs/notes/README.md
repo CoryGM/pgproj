@@ -43,12 +43,18 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Locks and large tables](locks.md) — the warning before a rewrite or a long lock, `publish --lock-timeout`, and `publish --concurrently`
 - [Entity relationship diagrams](erd.md) — `--erd`: the files, what is drawn, and a file already there
 - [Excluding grants, role memberships, and owners](excluding-grants-and-owners.md) — `excludeGrants`, `excludeRoleMemberships`, `excludeOwners`
+- [Variables in the deploy scripts](variables.md) — `:'name'` for a secret or a value per environment, from `PGPROJ_VAR_<name>`, and what the server keeps
 
 ## Cluster-wide objects and ownership
 
 - [Roles](roles.md) — reported, not modeled; the check before `publish --execute`
 - [Tablespaces](tablespaces.md) — the `TABLESPACE` clause, and the check before `publish --execute`
 - [Owners](owners.md) — `OWNER TO`, and why an owner the project does not state is not compared
+- [Privileges on types and domains](type-privileges.md) — `GRANT USAGE ON TYPE`, and `REVOKE ... FROM PUBLIC` for PostgreSQL's default
+- [Privileges on functions and procedures](routine-privileges.md) — `REVOKE ... FROM PUBLIC` for PostgreSQL's `EXECUTE`, kept when a routine is recreated
+- [Foreign data wrappers, servers, user mappings, and foreign tables](foreign-data.md) — with secrets as variables, `--apply-secrets`
+- [Privileges on the public schema](public-schema-privileges.md) — `REVOKE USAGE|CREATE ON SCHEMA public FROM PUBLIC` for PostgreSQL's default
+- [Default privileges](default-privileges.md) — `ALTER DEFAULT PRIVILEGES`: what a rule gives or revokes for a new object, and why an older one is left alone
 
 ## Tables, columns, and types
 
@@ -61,8 +67,9 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Table inheritance](inheritance.md) — `CREATE TABLE ... INHERITS (...)` and `CHECK ... NO INHERIT`
 - [Unnamed constraints and indexes](unnamed-objects.md) — the names PostgreSQL gives them, and when `build` warns
 - [Tables written with LIKE](table-like.md) — `CREATE TABLE ... (LIKE source INCLUDING ...)` as written, and what it copies
-- [Composite types](composite-types.md) — changes made in place, and the retype limitation
-- [Base types](base-types.md) — `CREATE TYPE ... (INPUT = ..., OUTPUT = ...)` is not modeled; its functions are left out with it
+- [Composite types](composite-types.md) — fields added and dropped in place, and a type rebuilt under its columns when a field is retyped
+- [Enum types](enum-types.md) — labels added and renamed in place, and a type rebuilt under its columns when a label is removed or reordered
+- [Base types](base-types.md) — `CREATE TYPE ... (INPUT = ..., OUTPUT = ...)` with its shell and functions, behind `--allow-superuser-statements`
 - [Views, and other definitions PostgreSQL rewrites](views.md) — comparing by PostgreSQL's own rendering
 - [SQL-standard routine bodies](sql-standard-routine-bodies.md) — `BEGIN ATOMIC` and `RETURN`
 - [Routine options](routine-options.md) — `SET`, `COST`, `ROWS`, `PARALLEL`, `LEAKPROOF`, and `WINDOW`

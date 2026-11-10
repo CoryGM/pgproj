@@ -38,8 +38,8 @@ sequence have different owners.
 
 ## Not modeled
 
-`OWNER TO CURRENT_USER`, an index's owner (it follows its table), and the owner of a kind of object pgproj does not model (a foreign data wrapper, a
-language, ...) are each reported as not modeled.
+`OWNER TO CURRENT_USER`, an index's owner (it follows its table), and the owner of a kind of object pgproj does not model (a
+language, a conversion, ...) are each reported as not modeled.
 
 ---
 

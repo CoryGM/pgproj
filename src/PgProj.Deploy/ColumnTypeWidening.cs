@@ -19,14 +19,58 @@ public static class ColumnTypeWidening
     {
         ArgumentNullException.ThrowIfNull(oldColumn);
         ArgumentNullException.ThrowIfNull(newColumn);
-        if (oldColumn.ArrayDimensions != newColumn.ArrayDimensions)
+        return oldColumn.ArrayDimensions == newColumn.ArrayDimensions && Keeps(oldColumn.DataType, oldColumn.TypeModifiers, newColumn.DataType, newColumn.TypeModifiers);
+    }
+
+    /// <summary>
+    /// The same rule for a composite type's field (G-119), from the two fields' comparable types
+    /// (<see cref="CompositeTypeFieldDefinition.ComparableType"/>, <c>varchar(10)</c>, <c>numeric(10,2)[]</c>). A type that cannot be read that way is not
+    /// known to keep every value.
+    /// </summary>
+    public static bool KeepsEveryValue(string? oldComparableType, string? newComparableType)
+    {
+        if (!TrySignature(oldComparableType, out var oldBase, out var oldModifiers, out var oldArray)
+            || !TrySignature(newComparableType, out var newBase, out var newModifiers, out var newArray))
         {
             return false;
         }
 
-        var oldBase = BaseType(oldColumn.DataType);
-        var newBase = BaseType(newColumn.DataType);
-        if (!TryModifiers(oldColumn.TypeModifiers, out var oldModifiers) || !TryModifiers(newColumn.TypeModifiers, out var newModifiers))
+        return oldArray == newArray && Keeps(oldBase, oldModifiers, newBase, newModifiers);
+    }
+
+    // base, base(m), or base(m1,m2), with [] after it for an array.
+    private static bool TrySignature(string? signature, out string baseType, out IReadOnlyList<string> modifiers, out bool isArray)
+    {
+        var text = (signature ?? string.Empty).Trim();
+        isArray = text.EndsWith("[]", StringComparison.Ordinal);
+        if (isArray)
+        {
+            text = text[..^2].TrimEnd();
+        }
+
+        modifiers = [];
+        var open = text.IndexOf('(', StringComparison.Ordinal);
+        if (open >= 0)
+        {
+            if (!text.EndsWith(')'))
+            {
+                baseType = string.Empty;
+                return false;
+            }
+
+            modifiers = text[(open + 1)..^1].Split(',');
+            text = text[..open].TrimEnd();
+        }
+
+        baseType = text;
+        return text.Length > 0;
+    }
+
+    private static bool Keeps(string? oldDataType, IReadOnlyList<string> oldTypeModifiers, string? newDataType, IReadOnlyList<string> newTypeModifiers)
+    {
+        var oldBase = BaseType(oldDataType);
+        var newBase = BaseType(newDataType);
+        if (!TryModifiers(oldTypeModifiers, out var oldModifiers) || !TryModifiers(newTypeModifiers, out var newModifiers))
         {
             return false;
         }

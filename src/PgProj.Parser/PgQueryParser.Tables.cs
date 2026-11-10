@@ -445,6 +445,11 @@ public sealed partial class PgQueryParser
                         ? new AlterTableColumnStorageNode(tableName, schemaName, storageColumn, storageText.ToLowerInvariant(), null)
                         : new AlterTableColumnStorageNode(tableName, schemaName, storageColumn, null, storageText.ToLowerInvariant()));
                     break;
+                case "AT_AlterColumnGenericOptions" when TryGetDirectStringProperty(command, "name") is { Length: > 0 } optionsColumn
+                    && TryGetDirectProperty(command, "def", out var optionsDefinition):
+                    // A foreign table's column options, as pg_dump writes them (G-133).
+                    nodes.Add(new AlterTableColumnOptionsNode(tableName, schemaName, optionsColumn, ReadOptionChanges(optionsDefinition)));
+                    break;
                 case "AT_AttachPartition" when string.Equals(TryGetDirectStringProperty(alterTable, "objtype"), "OBJECT_INDEX", StringComparison.Ordinal)
                     && TryGetDirectProperty(command, "def", out var indexAttachDefinition)
                     && TryGetDirectProperty(indexAttachDefinition, "PartitionCmd", out var indexAttachCommand)
@@ -643,6 +648,8 @@ public sealed partial class PgQueryParser
             TypeRange = isSerial ? null : NameRangeAt(TryGetDirectProperty(Unwrap(element, "ColumnDef"), "typeName", out var placedType) ? LocationOf(placedType, "TypeName") : null),
             NotNullName = isNullable == false ? TryGetColumnNotNullName(element) : null,
             NotNullNoInherit = isNullable == false && TryGetColumnNotNullNoInherit(element),
+            // A foreign table's column options (G-133).
+            ForeignOptions = ReadOptions(Unwrap(element, "ColumnDef"), "fdwoptions"),
         };
     }
 

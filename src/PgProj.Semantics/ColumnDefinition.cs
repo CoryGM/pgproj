@@ -87,6 +87,9 @@ public sealed record ColumnDefinition(
     /// The column's <c>COMPRESSION</c> (<c>pglz</c>, <c>lz4</c>, or <c>default</c>), lower case (G-222); a database's is null when it has none of its own. Compared only
     /// when the project states one (<c>default</c> is none of its own); changed in place with <c>SET COMPRESSION</c>.
     /// </summary>
+    /// <summary>A foreign table's column's <c>OPTIONS (...)</c> (G-133), compared by name in no order; empty for any other table's.</summary>
+    public IReadOnlyList<ForeignOptionDefinition> ForeignOptions { get; init; } = [];
+
     public string? Compression { get; init; }
 
     /// <summary>Whether the project's stated <c>STORAGE</c> differs from the database's (G-222).</summary>

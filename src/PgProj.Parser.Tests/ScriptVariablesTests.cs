@@ -41,4 +41,26 @@ public sealed class ScriptVariablesTests
         Assert.AreEqual("UPDATE t SET a = 1 WHERE b::text = 'x';", result.Text);
         Assert.IsFalse(result.UsesAny);
     }
+
+    [TestMethod]
+    public void NamesAreEachVariableOnceInTheOrderTheyFirstAppear()
+    {
+        var names = ScriptVariables.Names("ALTER ROLE :\"app_role\" PASSWORD :'app_password'; GRANT x TO :\"app_role\"; SELECT ':''not_one''', $$ :'nor_this' $$; -- :'nor_comment'");
+
+        CollectionAssert.AreEqual(new[] { "app_role", "app_password" }, names.ToArray(), "not inside a string, a dollar-quoted body, or a comment");
+    }
+
+    [TestMethod]
+    public void TheStandInKeepsEveryPositionAndParses()
+    {
+        const string Sql = "ALTER ROLE :\"app_role\" PASSWORD :'app_password';";
+
+        var standIn = ScriptVariables.StandIn(Sql);
+
+        Assert.AreEqual(Sql.Length, standIn.Length);
+        Assert.AreEqual("ALTER ROLE \"xxxxxxxxx\" PASSWORD 'xxxxxxxxxxxxx';", standIn);
+        Assert.IsEmpty(new PgQueryParser().Parse(standIn).Diagnostics.Where(static d => d.Severity == SqlDiagnosticSeverity.Error).ToArray());
+        const string Plain = "SELECT a::text FROM t WHERE b = ':''x''';";
+        Assert.AreSame(Plain, ScriptVariables.StandIn(Plain), "a script without variables is returned as it is");
+    }
 }

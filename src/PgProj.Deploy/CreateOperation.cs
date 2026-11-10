@@ -35,6 +35,15 @@ public sealed record class CreateOperation : SqlOperation
     /// </summary>
     public bool OnlyParent { get; init; }
 
+    /// <summary>
+    /// True for a grant (or a revoked default, G-337) issued again on an object that was dropped and created above (<c>InsertRegrants</c>, G-116): it puts back
+    /// what the object had, so it takes nothing away.
+    /// </summary>
+    public bool IsRestored { get; init; }
+
+    /// <summary>True for a routine changed with <c>CREATE OR REPLACE</c>, in place (G-338): it is not new, and it keeps its privileges.</summary>
+    public bool IsReplacedInPlace { get; init; }
+
     public override string GenerateSql()
         => Node switch
         {
@@ -59,6 +68,9 @@ public sealed record class CreateOperation : SqlOperation
             TextSearchDictionaryDefinition dictionary => TextSearchSqlBuilder.CreateDictionary(dictionary),
             TextSearchConfigurationDefinition configuration => TextSearchSqlBuilder.CreateConfiguration(configuration),
             PublicationDefinition publication => GenerateCreatePublication(publication),
+            ForeignDataWrapperDefinition wrapper => ForeignDataSql.CreateWrapper(wrapper),
+            ForeignServerDefinition server => ForeignDataSql.CreateServer(server),
+            UserMappingDefinition mapping => ForeignDataSql.CreateMapping(mapping),
             GrantDefinition grant => GenerateGrant(grant),
             OwnerDefinition owner => OwnerSqlBuilder.Alter(owner),
             SchemaDefinition schema => CommentSqlHelper.GenerateSchemaComment(schema.Name, schema.Comment),
@@ -82,6 +94,16 @@ public sealed record class CreateOperation : SqlOperation
         var partitionByClause = table.PartitionStrategy is null
             ? string.Empty
             : $"\nPARTITION BY {table.PartitionStrategy} ({string.Join(", ", table.PartitionKeyElements.Select(static element => element.ToSql(QuoteDottedName)))})";
+
+        // A foreign table (G-133) takes none of PARTITION BY, USING, WITH, or TABLESPACE, and its SERVER and OPTIONS go where they would.
+        if (table.ForeignServer is { } foreignServer)
+        {
+            unlogged = "FOREIGN ";
+            partitionByClause = string.Empty;
+            withClause = string.Empty;
+            tablespaceClause = string.Empty;
+            usingClause = $"\nSERVER {QuoteIdentifier(foreignServer)}" + (table.ForeignOptions.Count == 0 ? string.Empty : $" OPTIONS ({string.Join(", ", table.ForeignOptions.Select(static option => $"{PgProj.Parser.SqlIdentifiers.QuotePlain(option.Name)} {option.ValueSql}"))})");
+        }
 
         string sql;
         if (table.PartitionKeepsOwnColumns && !string.IsNullOrWhiteSpace(table.PartitionOfTableName))
@@ -183,7 +205,7 @@ public sealed record class CreateOperation : SqlOperation
             trailingStatements.Add(CommentSqlHelper.GenerateReplicaIdentity(table.SchemaName, table.Name, table.ReplicaIdentity));
         }
 
-        var tableComment = CommentSqlHelper.GenerateTableComment(table.SchemaName, table.Name, table.Comment);
+        var tableComment = CommentSqlHelper.GenerateTableComment(table.SchemaName, table.Name, table.Comment, table.IsForeign);
         if (tableComment is not null)
         {
             trailingStatements.Add(tableComment);
@@ -374,6 +396,12 @@ public sealed record class CreateOperation : SqlOperation
         if (column.Compression is not null)
         {
             builder.Append(" COMPRESSION ").Append(column.Compression);
+        }
+
+        // A foreign table's column's options, after the type, where the grammar puts them (G-133).
+        if (column.ForeignOptions.Count > 0)
+        {
+            builder.Append(" OPTIONS (").Append(string.Join(", ", column.ForeignOptions.Select(static option => $"{PgProj.Parser.SqlIdentifiers.QuotePlain(option.Name)} {option.ValueSql}"))).Append(')');
         }
 
         if (!string.IsNullOrWhiteSpace(column.CollationName))
@@ -1123,6 +1151,13 @@ public sealed record class CreateOperation : SqlOperation
             return AppendTypeComment(type, GenerateCreateDomain(type, qualifiedName));
         }
 
+        // A base type is created as the project wrote it (G-267), after its shell and its support functions (BaseTypeShellOperation); built from its options only for
+        // a model made in code.
+        if (type.IsBaseType)
+        {
+            return AppendTypeComment(type, (type.BaseTypeWrittenText ?? BuildBaseTypeSql(type, qualifiedName)) + ";");
+        }
+
         // A composite type with no fields is deployed too (G-268).
         if (type.CompositeFields.Count > 0 || type.IsComposite)
         {
@@ -1173,6 +1208,61 @@ public sealed record class CreateOperation : SqlOperation
         // Enum types are not currently modeled structurally; emit a clearly-marked TODO rather
         // than inventing behavior (G-13).
         return $"-- TODO: Generate CREATE TYPE SQL for '{type.Key}'. Enum types are not yet captured structurally.";
+    }
+
+    /// <summary>A base type's <c>CREATE TYPE</c> from its options (G-267), every option explicit, as <c>init</c> writes one; for a model made in code.</summary>
+    internal static string BuildBaseTypeSql(TypeDefinition type, string qualifiedName)
+    {
+        var options = type.BaseTypeOptions ?? new BaseTypeOptionsDefinition();
+        var parts = new List<string>();
+        foreach (var option in BaseTypeOptionsDefinition.FunctionOptions)
+        {
+            if (options.WrittenFunctions.TryGetValue(option, out var written) || options.Functions.TryGetValue(option, out written))
+            {
+                parts.Add($"{option} = {written}");
+            }
+        }
+
+        if (options.Like is { } like)
+        {
+            parts.Add($"LIKE = {like}");
+        }
+
+        if (options.InternalLength is { } length)
+        {
+            parts.Add($"INTERNALLENGTH = {(length < 0 ? "VARIABLE" : length.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
+        }
+
+        if (options.PassedByValue == true)
+        {
+            parts.Add("PASSEDBYVALUE");
+        }
+
+        if (options.Alignment is { } alignment)
+        {
+            parts.Add($"ALIGNMENT = {alignment switch { "c" => "char", "s" => "int2", "d" => "double", _ => "int4" }}");
+        }
+
+        if (options.Storage is { } storage)
+        {
+            parts.Add($"STORAGE = {storage switch { "e" => "external", "m" => "main", "x" => "extended", _ => "plain" }}");
+        }
+
+        parts.Add($"CATEGORY = {QuoteLiteral(options.Category)}");
+        parts.Add($"PREFERRED = {(options.Preferred ? "true" : "false")}");
+        if (options.Default is { } defaultValue)
+        {
+            parts.Add($"DEFAULT = {QuoteLiteral(defaultValue)}");
+        }
+
+        if (options.Element is { } element)
+        {
+            parts.Add($"ELEMENT = {element}");
+        }
+
+        parts.Add($"DELIMITER = {QuoteLiteral(options.Delimiter)}");
+        parts.Add($"COLLATABLE = {(options.Collatable ? "true" : "false")}");
+        return $"CREATE TYPE {qualifiedName} ({string.Join(", ", parts)})";
     }
 
     private static string AppendTypeComment(TypeDefinition type, string sql)

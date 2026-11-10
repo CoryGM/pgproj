@@ -64,6 +64,8 @@ internal sealed class LiveComparison
         await RenderProjectCheckConstraintsAsync(connection, projectModel, liveModel, cancellationToken);
         await RenderProjectRulesAsync(connection, projectModel, liveModel, cancellationToken);
         await RenderProjectPoliciesAsync(connection, projectModel, liveModel, cancellationToken);
+        // A base type's LIKE, which the database stores as the values it copies (G-267).
+        await ServerBaseTypeLikeResolver.ResolveAsync(connection, projectModel, cancellationToken);
         return (liveModel, _diffEngine.Diff(liveModel, projectModel));
     }
 

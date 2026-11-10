@@ -99,6 +99,12 @@ public sealed record TypeDefinition(
     /// </summary>
     public IReadOnlyList<string> EnumLabels { get; init; } = [];
 
+    /// <summary>
+    /// The project's <c>-- @renamed-label: old -> new</c> annotations (G-191): how <c>publish</c> turns the database's labels into these, never compared
+    /// (the database has none, and one already applied names a label the database no longer has).
+    /// </summary>
+    public IReadOnlyList<PgProj.Parser.EnumLabelRename> EnumLabelRenames { get; init; } = [];
+
     /// <summary>True for an enum type, which may have no labels yet (<c>CREATE TYPE t AS ENUM ()</c>, G-249): <see cref="EnumLabels"/> alone cannot tell an empty enum from a type that is not one.</summary>
     public bool IsEnum { get; init; }
 
@@ -164,6 +170,15 @@ public sealed record TypeDefinition(
 
     /// <summary>True when a typed table (<c>CREATE TABLE t OF this_type</c>) is of this composite type (G-136): changing one of its fields is written with <c>CASCADE</c>, which carries the change to the table.</summary>
     public bool HasTypedTables { get; init; }
+
+    /// <summary>A base type's options (G-267, <c>TypeKind == "base"</c>), in their comparison form; null for any other kind.</summary>
+    public BaseTypeOptionsDefinition? BaseTypeOptions { get; init; }
+
+    /// <summary>A base type's <c>CREATE TYPE</c> as written, which is what is deployed (G-267); null for any other kind, or one made in code.</summary>
+    public string? BaseTypeWrittenText { get; init; }
+
+    /// <summary>True for a base type (G-267): <c>CREATE TYPE name (INPUT = ..., OUTPUT = ...)</c>.</summary>
+    public bool IsBaseType => string.Equals(TypeKind, "base", StringComparison.Ordinal);
 
     /// <summary>
     /// The comparison form of a domain's <c>DEFAULT</c> (null when it has none); equal for two spellings of the

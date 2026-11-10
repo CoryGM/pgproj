@@ -51,6 +51,22 @@ Run pgproj on a supported platform, or in a Debian or Ubuntu based container on 
 [`PgProj.Engine` package](library.md#referencing-it) and builds for an unsupported runtime (`-r osx-x64`, `-r linux-musl-x64`) gets error `PGPROJ001`
 at build time instead; built for no runtime in particular, it gets this error when it runs on one.
 
+### No usable version of libssl was found
+
+```text
+No usable version of libssl was found
+```
+
+.NET prints this, and the command stops, when pgproj connects to a database (`diff`, `publish`, `init`) on a Linux system without an OpenSSL it can
+load. `build` and the other commands that only read files still work.
+
+- **Fedora 45 and later** (and any system with only OpenSSL 4): pgproj 0.2.1 and earlier load only OpenSSL 3. Update to a later release, which also
+  loads OpenSSL 4. Until you can, Fedora's own .NET may help: install it and the .NET tool, which runs on it (`sudo dnf install dotnet-sdk-10.0`,
+  then `dotnet tool install --global pgproj`). This is not an official workaround; it was tested only on x64, in a Fedora 45 container, with 0.2.1
+  connecting to PostgreSQL 18 for `diff`.
+- **Another system:** install OpenSSL: `sudo apt install libssl3t64` (Ubuntu 24.04), `libssl3` (Debian 12), or `sudo dnf install openssl-libs`
+  (Fedora, RHEL). The `.deb` and `.rpm` packages install it for you; the `.tar.gz` does not.
+
 ### Couldn't find a valid ICU package installed on the system
 
 .NET needs ICU on Linux. Install it: on Debian and Ubuntu the `libicu` package of your release (`sudo apt install libicu74` on Ubuntu 24.04,
@@ -131,10 +147,21 @@ PostgreSQL's documentation lists the codes.
 Each problem starts with where it is, `file:line:column-endLine:endColumn`, so an editor or terminal can jump to it. `[Error]` stops `diff` and `publish`;
 `[Warning]` does not.
 
+### ... in a deploy script ends the transaction pgproj publishes in
+
+```text
+pre.sql:2:1-2:7: [Error] COMMIT (or END) in a deploy script ends the transaction pgproj publishes in, so what comes after it would run outside the transaction and stay applied when a later statement fails; remove it (pgproj commits at the end): COMMIT
+```
+
+The pre- and post-deploy scripts run inside `publish`'s transaction. Remove the `COMMIT` or `ROLLBACK`: pgproj commits once everything has run, and
+rolls back if anything fails. The same error for `VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, and the like (`cannot run inside a transaction
+block`) means PostgreSQL would refuse the statement inside a transaction: run it separately, outside pgproj. A `BEGIN` is only a warning, and a savepoint
+is fine ([`pgproj.json.md`](../pgproj.json.md#transactions)).
+
 ### ... is not modeled; the statement is ignored
 
 ```text
-sql/a.sql:2:1-2:55: [Warning] CREATE SERVER is not modeled; the statement is ignored: CREATE SERVER remote FOREIGN DATA WRAPPER postgres_fdw
+sql/a.sql:2:1-2:79: [Warning] CREATE CONVERSION is not modeled; the statement is ignored: CREATE CONVERSION latin1_to_utf8 FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
 ```
 
 pgproj does not model that kind of statement, so `publish` will never deploy it. If the database needs it, move it to a `predeploy` or `postdeploy`
@@ -163,6 +190,16 @@ statement PostgreSQL 18 accepts, pgproj accepts.
 ## `publish` refused to run
 
 When `publish --execute` refuses, nothing has run. `--dry-run` prints the script so you can see what it would do.
+
+### the script uses :'...', which has no value
+
+```text
+Publish failed: the script uses :'app_password', which has no value, so nothing was run. Set PGPROJ_VAR_app_password in the environment.
+```
+
+A pre- or post-deploy script names a value with psql's variable syntax, and `--execute` found no environment variable for it. Set `PGPROJ_VAR_<name>`
+(the name after the `:`, as written), or correct the name in the script. `pgproj about` lists the variables it finds. See
+[Variables in the deploy scripts](notes/variables.md).
 
 ### can discard data and were not executed
 
@@ -212,6 +249,33 @@ The project uses something only a newer PostgreSQL accepts, and the target serve
 The script changes so many tables and indexes at once that PostgreSQL would run out of lock space partway and roll back. The message gives the
 `max_locks_per_transaction` value that would fit; raise it (it takes a server restart), publish in smaller steps, or pass `--allow-lock-limit` if you know
 the server has room ([Locks and large tables](notes/locks.md)).
+
+### holds a label the enum type ... no longer has
+
+```text
+Publish failed: P0001: the column app.visits.mood holds a label the enum type app.mood no longer has, so the type was not rebuilt: invalid input value for enum app.mood: "ok"
+  Hint: Change or delete those rows first (a pre-deploy script can), or keep the label.
+  The statement that failed: DO $pgproj$ BEGIN ALTER TABLE "app"."visits" ALTER COLUMN "mood" TYPE "app"."mood" USING "mood"::text::"app"."mood"; EXC...
+  Nothing was applied: the script was rolled back.
+```
+
+The project removed a label from an enum type, and a row still holds it, so the type could not be rebuilt under its column. Change those rows to a label
+the type keeps, in a pre-deploy script (`UPDATE app.visits SET mood = 'sad' WHERE mood = 'ok';`) or by hand, then publish again; or keep the label. If the
+label was renamed, not removed, say so above the `CREATE TYPE` (`-- @renamed-label: ok -> fine`), and it is renamed in place
+([Enum types](notes/enum-types.md)).
+
+### holds a value the composite type ... cannot take after the change
+
+```text
+Publish failed: 22001: the column app.homes.a holds a value the composite type app.addr cannot take after the change, so the type was not rebuilt: value too long for type character varying(3)
+  Hint: Change those rows first (a pre-deploy script can), or keep the field's type.
+  The statement that failed: DO $pgproj$ BEGIN ALTER TABLE "app"."homes" ALTER COLUMN "a" TYPE "app"."addr" USING CASE WHEN "a"::text IS NULL THEN ...
+  Nothing was applied: the script was rolled back.
+```
+
+The project narrowed a field of a composite type that a column uses (here `zip varchar(5)` to `varchar(3)`), and a row holds a value the new field
+cannot take, so the type could not be rebuilt under its column. Change those rows so the value fits, in a pre-deploy script
+(`UPDATE app.homes SET a.zip = left((a).zip, 3);`) or by hand, then publish again; or keep the field's type ([Composite types](notes/composite-types.md)).
 
 ### The server refused a statement
 

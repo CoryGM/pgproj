@@ -43,12 +43,19 @@ run ubuntu:24.04 bash -c "
     tar -xzf /dist/pgproj-$version-$rid.tar.gz -C /tmp &&
     /packaging/smoke-test.sh /tmp/pgproj-$version-$rid/pgproj $version"
 
+echo "== $rid: the archive, on Ubuntu 26.10 with OpenSSL 4 only (no OpenSSL 3: .NET must load libssl.so.4, G-334)"
+run ubuntu:26.10 bash -c "
+    apt-get update -qq && apt-get install -y -qq --no-install-recommends libicu78 libssl4 >/dev/null &&
+    ! dpkg -s libssl3t64 >/dev/null 2>&1 &&
+    tar -xzf /dist/pgproj-$version-$rid.tar.gz -C /tmp &&
+    /packaging/smoke-test.sh /tmp/pgproj-$version-$rid/pgproj $version"
+
 echo "== $rid: the .deb, on Debian 12 (its dependencies must resolve from the distribution)"
 run debian:12 bash -c "
     apt-get update -qq && apt-get install -y -qq /dist/pgproj_*_$deb_arch.deb >/dev/null &&
     /packaging/smoke-test.sh pgproj $version"
 
-echo "== $rid: the .rpm, on Fedora"
+echo "== $rid: the .rpm, on the newest Fedora (OpenSSL 4 since Fedora 45, G-334)"
 run fedora:latest bash -c "
     dnf install -y -q /dist/pgproj-*.$rpm_arch.rpm &&
     /packaging/smoke-test.sh pgproj $version"

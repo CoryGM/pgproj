@@ -31,10 +31,18 @@ internal static class ScriptExecution
     /// statement that cannot get its lock in time fails, the whole script is rolled back, and the error names the statement, instead of waiting behind a long transaction
     /// and blocking everything that queues behind it.
     /// </summary>
-    public static async Task ExecuteScriptAsync(NpgsqlConnection connection, string script, string? lockTimeout, CancellationToken cancellationToken)
+    public static Task ExecuteScriptAsync(NpgsqlConnection connection, string script, string? lockTimeout, CancellationToken cancellationToken)
+        => ExecuteScriptAsync(connection, script, lockTimeout, new Dictionary<string, string>(), cancellationToken);
+
+    /// <summary>
+    /// As above, each statement's variables (G-336) filled in with <paramref name="variables"/> only as it is sent: a failure names the statement as written,
+    /// with its placeholders, and every value is masked in what the server said about it.
+    /// </summary>
+    public static async Task ExecuteScriptAsync(NpgsqlConnection connection, string script, string? lockTimeout, IReadOnlyDictionary<string, string> variables, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(script);
+        ArgumentNullException.ThrowIfNull(variables);
 
         var statements = SqlStatementSplitter.Split(script);
         if (statements.Count == 0)
@@ -55,7 +63,9 @@ internal static class ScriptExecution
             {
                 // A batch command is sent as written. A plain command is split at every semicolon by Npgsql, which cuts a
                 // BEGIN ATOMIC routine body (G-95) apart.
-                await using var batch = new NpgsqlBatch(connection, transaction) { BatchCommands = { new NpgsqlBatchCommand(statement) } };
+                // The values go only into what is sent (G-336); everything said about the statement uses it as written.
+                var sent = variables.Count == 0 ? statement : ScriptVariables.Substitute(statement, variables).Text;
+                await using var batch = new NpgsqlBatch(connection, transaction) { BatchCommands = { new NpgsqlBatchCommand(sent) } };
                 try
                 {
                     await batch.ExecuteNonQueryAsync(cancellationToken);
@@ -63,27 +73,31 @@ internal static class ScriptExecution
                 catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.LockNotAvailable && lockTimeout is not null)
                 {
                     throw new ScriptExecutionException(
-                        new PublishFailure(
-                            $"a lock was not granted within --lock-timeout {lockTimeout}, so nothing was applied (the script was rolled back). The statement waiting for it: {UnmodeledStatementSnippet(statement)}",
-                            exception.SqlState,
-                            null,
-                            null,
-                            UnmodeledStatementSnippet(statement),
-                            AfterCommit: false,
-                            []),
+                        MaskValues(
+                            new PublishFailure(
+                                $"a lock was not granted within --lock-timeout {lockTimeout}, so nothing was applied (the script was rolled back). The statement waiting for it: {UnmodeledStatementSnippet(statement)}",
+                                exception.SqlState,
+                                null,
+                                null,
+                                UnmodeledStatementSnippet(statement),
+                                AfterCommit: false,
+                                []),
+                            variables),
                         exception);
                 }
                 catch (PostgresException exception)
                 {
                     throw new ScriptExecutionException(
-                        new PublishFailure(
-                            DescribeFailedStatement(exception, statement),
-                            exception.SqlState,
-                            ShownDetail(exception),
-                            string.IsNullOrWhiteSpace(exception.Hint) ? null : exception.Hint,
-                            UnmodeledStatementSnippet(statement),
-                            AfterCommit: false,
-                            []),
+                        MaskValues(
+                            new PublishFailure(
+                                DescribeFailedStatement(exception, statement),
+                                exception.SqlState,
+                                ShownDetail(exception),
+                                string.IsNullOrWhiteSpace(exception.Hint) ? null : exception.Hint,
+                                UnmodeledStatementSnippet(statement),
+                                AfterCommit: false,
+                                []),
+                            variables),
                         exception);
                 }
             }
@@ -181,6 +195,33 @@ internal static class ScriptExecution
                 await RunAsync(connection, "RESET lock_timeout", CancellationToken.None);
             }
         }
+    }
+
+    /// <summary>
+    /// A failure with every variable's value (G-336) masked as <c>*****</c>, as written and as SQL quotes it (<c>'</c> doubled): the server's message, detail,
+    /// or hint may quote what it was sent. The longest values first, so one that holds another is masked whole.
+    /// </summary>
+    internal static PublishFailure MaskValues(PublishFailure failure, IReadOnlyDictionary<string, string> variables)
+    {
+        if (variables.Count == 0)
+        {
+            return failure;
+        }
+
+        var values = variables.Values
+            .Where(static value => value.Length > 0)
+            .SelectMany(static value => new[] { value, value.Replace("'", "''", StringComparison.Ordinal), value.Replace("\"", "\"\"", StringComparison.Ordinal) })
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(static value => value.Length)
+            .ToArray();
+        string? Mask(string? text) => text is null ? null : values.Aggregate(text, static (masked, value) => masked.Replace(value, "*****", StringComparison.Ordinal));
+        return failure with
+        {
+            Message = Mask(failure.Message)!,
+            Detail = Mask(failure.Detail),
+            Hint = Mask(failure.Hint),
+            Statement = Mask(failure.Statement),
+        };
     }
 
     /// <summary>One statement outside any transaction block: a batch of one command, which Npgsql does not wrap in one.</summary>

@@ -171,9 +171,9 @@ public sealed class ObjectGrantDeclarationTests
 
     [TestMethod]
     [DataRow("GRANT CONNECT ON DATABASE d TO r;", "DATABASE")]
-    [DataRow("GRANT USAGE ON TYPE public.ty TO r;", "TYPE")]
+    [DataRow("GRANT CREATE ON TABLESPACE ts TO r;", "TABLESPACE")]
     [DataRow("GRANT USAGE ON LANGUAGE plpgsql TO r;", "LANGUAGE")]
-    [DataRow("GRANT USAGE ON FOREIGN DATA WRAPPER w TO r;", "FDW")]
+    [DataRow("GRANT SELECT ON LARGE OBJECT 1 TO r;", "LARGE")] // a wrapper was the example until G-132 modeled its grants
     public void GrantOnAnUnmodeledKindIsReported(string sql, string kind)
     {
         var model = Build(sql);

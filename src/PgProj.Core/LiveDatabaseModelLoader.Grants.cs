@@ -18,9 +18,14 @@ public sealed partial class LiveDatabaseModelLoader
     {
         var grants = new List<LiveGrantSnapshot>();
         grants.AddRange(await ReadSchemaGrantsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadPublicSchemaRevokedDefaultsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadObjectGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadColumnGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadDefaultPrivilegesGrantsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadTypeGrantsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadRoutineRevokedDefaultsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadDefaultPrivilegeRevokedDefaultsAsync(connection, cancellationToken));
+        grants.AddRange(await ReadForeignDataGrantsAsync(connection, cancellationToken));
         grants.AddRange(await ReadRoleMembershipsAsync(connection, cancellationToken));
         return grants;
     }
@@ -68,6 +73,40 @@ public sealed partial class LiveDatabaseModelLoader
     }
 
     /// <summary>
+    /// The <c>public</c> schema without a privilege PostgreSQL gives <c>PUBLIC</c> on it (G-341), as <c>REVOKE USAGE|CREATE ON SCHEMA public FROM PUBLIC</c>, the form
+    /// <c>pg_dump</c> writes: <c>USAGE</c> on every version, <c>CREATE</c> by default only before PostgreSQL 15 (on 15 and later every database reads as without it,
+    /// which a project that does not state it does not compare). A null list is the owner's alone (<c>acldefault</c>): a <c>public</c> schema created again by hand
+    /// has neither.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadPublicSchemaRevokedDefaultsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
+    {
+        const string publicSchemaSql =
+            """
+            select exists (select 1 from pg_catalog.aclexplode(coalesce(ns.nspacl, pg_catalog.acldefault('n', ns.nspowner))) acl where acl.grantee = 0 and acl.privilege_type = 'USAGE') as has_usage,
+                   exists (select 1 from pg_catalog.aclexplode(coalesce(ns.nspacl, pg_catalog.acldefault('n', ns.nspowner))) acl where acl.grantee = 0 and acl.privilege_type = 'CREATE') as has_create
+            from pg_catalog.pg_namespace ns
+            where ns.nspname = 'public'
+              and (@schemas is null or ns.nspname = any(@schemas));
+            """;
+
+        var grants = new List<LiveGrantSnapshot>();
+        await using var command = CreateCommand(publicSchemaSql, connection, scopeSchemas);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            foreach (var (privilege, has) in new[] { ("USAGE", reader.GetBoolean(0)), ("CREATE", reader.GetBoolean(1)) })
+            {
+                if (!has)
+                {
+                    grants.Add(new LiveGrantSnapshot("public", "schema:public", "PUBLIC", $"REVOKE {privilege} ON SCHEMA {RenderIdentifier("public")} FROM PUBLIC"));
+                }
+            }
+        }
+
+        return grants;
+    }
+
+    /// <summary>
     /// Privileges on tables (views, materialized views, and foreign tables included), sequences, functions, and procedures. Where
     /// a grantee holds a privilege on every object of a kind in a schema it is reported once as <c>ALL ... IN SCHEMA</c>; whatever
     /// is left, and every privilege on a schema that is not covered throughout, is reported per object. (A schema where the
@@ -98,8 +137,6 @@ public sealed partial class LiveDatabaseModelLoader
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
               -- A range type's constructor functions and its multirange's are created with the type (G-69).
               and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
-              -- A base type's support functions belong to the type, which is not modeled (G-241).
-              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
               and (@schemas is null or ns.nspname = any(@schemas))
@@ -143,8 +180,6 @@ public sealed partial class LiveDatabaseModelLoader
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
               -- A range type's constructor functions and its multirange's are created with the type (G-69).
               and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
-              -- A base type's support functions belong to the type, which is not modeled (G-241).
-              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
               and (@schemas is null or ns.nspname = any(@schemas));
@@ -246,6 +281,170 @@ public sealed partial class LiveDatabaseModelLoader
         return grants;
     }
 
+    /// <summary>
+    /// Privileges on enum, composite, range, and base types (G-267) and on domains (G-337), read as a project states them. A type whose list is null has PostgreSQL's default
+    /// (the owner and <c>PUBLIC</c> have <c>USAGE</c>) and is not reported. Once a grant or revoke has written the list out, each role but the owner is reported with
+    /// a <c>GRANT</c>, and a list without <c>PUBLIC</c> as <c>REVOKE USAGE ... FROM PUBLIC</c>, the one revoke pgproj reads (option (B)). An array type has no
+    /// privileges of its own (PostgreSQL refuses a grant on one), a table's row type is the table's, and a multirange type is made with its range type: none is read.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadTypeGrantsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
+    {
+        const string typeGrantSql =
+            """
+            select ns.nspname as schema_name,
+                   typ.typname as type_name,
+                   typ.typtype = 'd' as is_domain,
+                   case when acl.grantee = 0 then 'PUBLIC' else pg_catalog.pg_get_userbyid(acl.grantee) end as grantee,
+                   acl.is_grantable
+            from pg_catalog.pg_type typ
+            inner join pg_catalog.pg_namespace ns on ns.oid = typ.typnamespace
+            cross join lateral pg_catalog.aclexplode(typ.typacl) acl
+            where typ.typacl is not null
+              and acl.privilege_type = 'USAGE'
+              and acl.grantee <> typ.typowner
+              and (typ.typtype in ('e', 'r', 'd')
+                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c'))
+                   -- A base type (G-267), not the array type PostgreSQL made for one (which has no privileges of its own).
+                   or (typ.typtype = 'b' and typ.typisdefined and not exists (select 1 from pg_catalog.pg_type element_of where element_of.typarray = typ.oid)))
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas))
+            union all
+            -- A list that has been written out but names no one but the owner: PUBLIC's default was revoked, and nothing else was granted.
+            select ns.nspname, typ.typname, typ.typtype = 'd', null, false
+            from pg_catalog.pg_type typ
+            inner join pg_catalog.pg_namespace ns on ns.oid = typ.typnamespace
+            where typ.typacl is not null
+              and not exists (select 1 from pg_catalog.aclexplode(typ.typacl) acl where acl.grantee <> typ.typowner and acl.privilege_type = 'USAGE')
+              and (typ.typtype in ('e', 'r', 'd')
+                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c'))
+                   -- A base type (G-267), not the array type PostgreSQL made for one (which has no privileges of its own).
+                   or (typ.typtype = 'b' and typ.typisdefined and not exists (select 1 from pg_catalog.pg_type element_of where element_of.typarray = typ.oid)))
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas));
+            """;
+
+        var granteesByType = new SortedDictionary<(string SchemaName, string TypeName), (bool IsDomain, List<(string Grantee, bool GrantOption)> Grantees)>();
+        await using (var command = CreateCommand(typeGrantSql, connection, scopeSchemas))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var key = (reader.GetString(0), reader.GetString(1));
+                if (!granteesByType.TryGetValue(key, out var entry))
+                {
+                    entry = (reader.GetBoolean(2), []);
+                    granteesByType[key] = entry;
+                }
+
+                if (!reader.IsDBNull(3))
+                {
+                    entry.Grantees.Add((reader.GetString(3), reader.GetBoolean(4)));
+                }
+            }
+        }
+
+        var grants = new List<LiveGrantSnapshot>();
+        foreach (var ((schemaName, typeName), (isDomain, grantees)) in granteesByType)
+        {
+            var objectKey = $"type:{schemaName}.{typeName}()";
+            var target = $"{(isDomain ? "DOMAIN" : "TYPE")} {RenderIdentifier(schemaName)}.{RenderIdentifier(typeName)}";
+            if (!grantees.Any(static grantee => grantee.Grantee == "PUBLIC"))
+            {
+                grants.Add(new LiveGrantSnapshot(schemaName, objectKey, "PUBLIC", $"REVOKE USAGE ON {target} FROM PUBLIC"));
+            }
+
+            foreach (var (grantee, grantOption) in grantees.Where(static grantee => grantee.Grantee != "PUBLIC").OrderBy(static grantee => grantee.Grantee, StringComparer.Ordinal))
+            {
+                grants.Add(new LiveGrantSnapshot(schemaName, objectKey, grantee, $"GRANT USAGE ON {target} TO {RenderGrantee(grantee)}{(grantOption ? WithGrantOption : string.Empty)}"));
+            }
+        }
+
+        return grants;
+    }
+
+    /// <summary>
+    /// Functions and procedures without <c>PUBLIC</c>'s <c>EXECUTE</c> (G-338), as <c>REVOKE ALL ON FUNCTION|PROCEDURE ... FROM PUBLIC</c>, the form <c>pg_dump</c>
+    /// writes. A routine whose list is null has PostgreSQL's default; once a grant or revoke has written the list out, one without <c>PUBLIC</c> was revoked. The
+    /// other entries are read with the other objects' privileges. The same routines are read as there: not an extension's, a range type's constructors, or a base
+    /// type's support functions; aggregates are not read. The key names the routine as <c>init</c> files it (by its identity arguments), and the statement by its
+    /// argument types.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadRoutineRevokedDefaultsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
+    {
+        const string routineRevokeSql =
+            """
+            select ns.nspname as schema_name,
+                   proc.proname as routine_name,
+                   proc.prokind = 'p' as is_procedure,
+                   pg_catalog.oidvectortypes(proc.proargtypes) as argument_types,
+                   pg_catalog.pg_get_function_identity_arguments(proc.oid) as identity_arguments
+            from pg_catalog.pg_proc proc
+            inner join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+            where proc.prokind in ('f', 'w', 'p')
+              and proc.proacl is not null
+              and not exists (select 1 from pg_catalog.aclexplode(proc.proacl) acl where acl.grantee = 0 and acl.privilege_type = 'EXECUTE')
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
+              and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
+              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas))
+            order by schema_name, routine_name, argument_types;
+            """;
+
+        var grants = new List<LiveGrantSnapshot>();
+        await using var command = CreateCommand(routineRevokeSql, connection, scopeSchemas);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var schemaName = reader.GetString(0);
+            var name = reader.GetString(1);
+            var keyword = reader.GetBoolean(2) ? "PROCEDURE" : "FUNCTION";
+            grants.Add(new LiveGrantSnapshot(
+                schemaName,
+                $"{keyword.ToLowerInvariant()}:{schemaName}.{name}({reader.GetString(4)})",
+                "PUBLIC",
+                $"REVOKE ALL ON {keyword} {RenderIdentifier(schemaName)}.{RenderIdentifier(name)}({reader.GetString(3)}) FROM PUBLIC"));
+        }
+
+        return grants;
+    }
+
+    /// <summary>
+    /// Rules that new types or functions are created without <c>PUBLIC</c>'s default (G-338, part (i)): a list with no <c>IN SCHEMA</c> on types or functions
+    /// without <c>PUBLIC</c>'s entry, which PostgreSQL stores once a rule exists and keeps the default in unless it was revoked (G-340), read as <c>ALTER DEFAULT
+    /// PRIVILEGES [FOR ROLE r] REVOKE ALL ON TYPES|FUNCTIONS FROM PUBLIC</c>. A list in one schema only adds to the global one, so it says nothing of the default.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadDefaultPrivilegeRevokedDefaultsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string revokedDefaultSql =
+            """
+            select case defacl.defaclobjtype when 'T' then 'types' else 'functions' end as object_kind,
+                   case when pg_catalog.pg_get_userbyid(defacl.defaclrole) = current_user then null else pg_catalog.pg_get_userbyid(defacl.defaclrole) end as for_role
+            from pg_catalog.pg_default_acl defacl
+            where defacl.defaclnamespace = 0
+              and defacl.defaclobjtype in ('T', 'f')
+              and not exists (select 1 from pg_catalog.aclexplode(defacl.defaclacl) acl where acl.grantee = 0)
+            order by object_kind, for_role nulls first;
+            """;
+
+        var grants = new List<LiveGrantSnapshot>();
+        await using var command = new NpgsqlCommand(revokedDefaultSql, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var objectKind = reader.GetString(0);
+            var roleClause = reader.IsDBNull(1) ? string.Empty : $" FOR ROLE {RenderIdentifier(reader.GetString(1))}";
+            grants.Add(new LiveGrantSnapshot(string.Empty, $"default {objectKind}", "PUBLIC", $"ALTER DEFAULT PRIVILEGES{roleClause} REVOKE ALL ON {objectKind.ToUpperInvariant()} FROM PUBLIC"));
+        }
+
+        return grants;
+    }
+
     /// <summary>Privileges limited to columns, one statement per table, grantee, privilege, and grant option, listing the columns.</summary>
     private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadColumnGrantsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
     {
@@ -309,6 +508,8 @@ public sealed partial class LiveDatabaseModelLoader
     /// Default privileges. Those of the role that is connected are reported as they are written (no <c>FOR ROLE</c>); those of any
     /// other role say <c>FOR ROLE</c>, which is how a project states them. The role's own entry in its list is left out, as for
     /// every other kind of privilege: it is implicit, and reporting it would have the project revoke the role's own defaults.
+    /// <c>PUBLIC</c>'s <c>USAGE</c> in a list with no <c>IN SCHEMA</c> on types, and its <c>EXECUTE</c> in one on functions, are left out too (G-340): PostgreSQL
+    /// stores the whole default list for the kind once such a rule exists, and those entries are its built-in defaults, not a rule the project states.
     /// </summary>
     private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadDefaultPrivilegesGrantsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
     {
@@ -332,6 +533,10 @@ public sealed partial class LiveDatabaseModelLoader
             cross join lateral pg_catalog.aclexplode(defacl.defaclacl) acl
             where defacl.defaclobjtype in ('r', 'S', 'f', 'T', 'n')
               and acl.grantee <> defacl.defaclrole
+              -- A rule with no IN SCHEMA on types or functions stores the kind's whole list, PUBLIC's built-in USAGE or EXECUTE included:
+              -- PostgreSQL's default, not a rule (G-340).
+              and not (acl.grantee = 0 and defacl.defaclnamespace = 0
+                       and ((defacl.defaclobjtype = 'T' and acl.privilege_type = 'USAGE') or (defacl.defaclobjtype = 'f' and acl.privilege_type = 'EXECUTE')))
               -- A default privilege with no IN SCHEMA (ns.nspname is null) applies database-wide, not to one
               -- schema, so schema-scoping never excludes it (G-85).
               and (@schemas is null or ns.nspname is null or ns.nspname = any(@schemas))

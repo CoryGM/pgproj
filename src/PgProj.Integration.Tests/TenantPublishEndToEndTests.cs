@@ -45,9 +45,11 @@ public sealed class TenantPublishEndToEndTests
 
             var dryRun = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--dry-run");
             Assert.AreEqual(0, dryRun.ExitCode, dryRun.Output);
-            StringAssert.Contains(dryRun.Output, "-- pgproj: tenant tenant_acme (a transaction of its own)\nSET search_path TO tenant_acme, platform, public;".ReplaceLineEndings());
+            // G-165: each part carries its own BEGIN and COMMIT; the warning says the parts are separate transactions and advises ON_ERROR_STOP.
+            StringAssert.Contains(dryRun.Output, "-- pgproj: tenant tenant_acme (a transaction of its own)\nBEGIN;\n\nSET search_path TO tenant_acme, platform, public;".ReplaceLineEndings());
             StringAssert.Contains(dryRun.Output, "CREATE SCHEMA IF NOT EXISTS \"tenant_globex\"");
-            StringAssert.Contains(dryRun.Output, "the script is not wrapped in transactions");
+            StringAssert.Contains(dryRun.Output, "are transactions of their own, as pgproj publish --execute runs them");
+            StringAssert.Contains(dryRun.Output, "psql -v ON_ERROR_STOP=1 -f <file>");
 
             var publish = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
             Assert.AreEqual(0, publish.ExitCode, publish.Output);
@@ -86,6 +88,49 @@ public sealed class TenantPublishEndToEndTests
             StringAssert.Contains(dropped.Output, "pgproj left the schema and everything in it as they are");
             Assert.AreEqual("1", await ScalarTextAsync(connectionString, "select count(*)::text from pg_namespace where nspname = 'tenant_globex'"));
             Assert.AreEqual("1", await ScalarTextAsync(connectionString, "select count(*)::text from pg_tables where schemaname = 'tenant_globex' and tablename = 'orders'"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+            TryDeleteDirectory(projectDirectory);
+        }
+    }
+
+    /// <summary>
+    /// G-165: a written script for tenants has a transaction per part. Run with <c>psql -v ON_ERROR_STOP=1 -f</c>, it publishes the parts in order and stops at
+    /// one that fails, which is rolled back, leaving the parts before it published, as <c>--execute</c> does; once the cause is gone, it converges.
+    /// </summary>
+    [TestMethod]
+    public async Task AWrittenScriptForTenantsRunWithPsqlStopsAtThePartThatFails()
+    {
+        var databaseName = await CreateDatabaseAsync("g165t");
+        // The tenants' own post-deploy script: the division is by zero for globex only (a constant, so either way it is the same on every server).
+        var projectDirectory = CreateTenantProject("g165t", """, "file": "./tenants.csv", "postdeploy": "./tenant-post.sql" """, "tenant\nacme\nglobex\n");
+        try
+        {
+            var connectionString = ConnectionStringFor(databaseName);
+            var projectFile = ProjectFile(projectDirectory);
+            File.WriteAllText(Path.Combine(projectDirectory, "tenant-post.sql"), "SELECT 1 / (CASE WHEN :'tenant_id' = 'globex' THEN 0 ELSE 1 END);\n");
+            var scriptPath = Path.Combine(projectDirectory, "deploy.sql");
+
+            Assert.AreEqual(0, (await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--output", scriptPath)).ExitCode);
+            var script = await File.ReadAllTextAsync(scriptPath);
+            Assert.AreEqual(3, script.Split("BEGIN;").Length - 1, "a transaction for the shared part and one per tenant: " + script);
+            Assert.AreEqual(3, script.Split("COMMIT;").Length - 1);
+
+            var (exitCode, output) = await PostgresContainerFixture.RunPsqlFileAsync(databaseName, script, "-v", "ON_ERROR_STOP=1");
+
+            Assert.AreEqual(3L, exitCode, output);
+            StringAssert.Contains(output, "division by zero");
+            Assert.AreEqual("1", await ScalarTextAsync(connectionString, "select count(*)::text from pg_tables where schemaname = 'platform' and tablename = 'currencies'"), "the shared part was published");
+            Assert.AreEqual("1", await ScalarTextAsync(connectionString, "select count(*)::text from pg_tables where schemaname = 'tenant_acme' and tablename = 'orders'"), "the tenant before it was published");
+            Assert.AreEqual("0", await ScalarTextAsync(connectionString, "select count(*)::text from pg_namespace where nspname = 'tenant_globex'"), "the failed tenant's part was rolled back, its schema too");
+
+            File.WriteAllText(Path.Combine(projectDirectory, "tenant-post.sql"), "SELECT 1;\n");
+            Assert.AreEqual(0, (await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--output", scriptPath)).ExitCode);
+            var (secondExit, secondOutput) = await PostgresContainerFixture.RunPsqlFileAsync(databaseName, await File.ReadAllTextAsync(scriptPath), "-v", "ON_ERROR_STOP=1");
+            Assert.AreEqual(0L, secondExit, secondOutput);
+            await AssertConvergedAsync(projectFile, connectionString);
         }
         finally
         {

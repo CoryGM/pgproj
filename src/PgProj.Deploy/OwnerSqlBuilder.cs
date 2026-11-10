@@ -24,6 +24,8 @@ internal static class OwnerSqlBuilder
             "domain" => $"DOMAIN {name}",
             "event trigger" => $"EVENT TRIGGER {Quote(owner.ObjectName)}",
             "publication" => $"PUBLICATION {Quote(owner.ObjectName)}",
+            "foreign data wrapper" => $"FOREIGN DATA WRAPPER {Quote(owner.ObjectName)}",
+            "server" => $"SERVER {Quote(owner.ObjectName)}",
             "collation" => $"COLLATION {name}",
             "statistics" => $"STATISTICS {name}",
             "text search dictionary" => $"TEXT SEARCH DICTIONARY {name}",

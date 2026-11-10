@@ -1,5 +1,6 @@
 using PgProj.Core;
 using PgProj.Deploy;
+using PgProj.Semantics;
 
 namespace PgProj.Engine;
 
@@ -10,24 +11,90 @@ namespace PgProj.Engine;
 internal static class PublishTexts
 {
     /// <summary>
-    /// The script pgproj writes (<c>--output</c>) or prints (<c>--dry-run</c>, or no <c>--execute</c>) is not wrapped in a transaction, so a client other
-    /// than <c>pgproj publish --execute</c> that fails partway leaves the schema half-migrated (G-165, #16, deferred by the user: the warning is the resolution).
-    /// </summary>
-    public const string ScriptNotTransactionalWarning =
-        "Warning: the script is not wrapped in a transaction; run it inside one (psql --single-transaction -f <file>) or with pgproj publish --execute, which runs it in a single transaction, so a failure partway leaves nothing applied.";
-
-    /// <summary>
-    /// The warning for a printed or written <c>--concurrently</c> script (G-271): its second part cannot run in a transaction block, so
-    /// <c>psql --single-transaction</c>, the advice of <see cref="ScriptNotTransactionalWarning"/>, would make it fail.
+    /// The warning for a printed or written <c>--concurrently</c> script (G-271): the script carries its transaction (G-165), but the statements below the
+    /// marker cannot run in a transaction block, so they run after it commits, and a client that goes on after an error would run them after a failed one.
     /// </summary>
     public const string ConcurrentScriptWarning =
-        "Warning: the script is not wrapped in a transaction. Run the part above the line \"" + ConcurrentPublishPlan.Marker + "\" inside one, and the part below it without one, " +
-        "one statement at a time (psql --single-transaction would make CREATE INDEX CONCURRENTLY fail); or use pgproj publish --execute --concurrently, which does both.";
+        "Warning: the statements below the line \"" + ConcurrentPublishPlan.Marker + "\" run outside the script's transaction, after its COMMIT, one at a time. "
+        + "Run the script with psql -v ON_ERROR_STOP=1 -f <file>, so they are not run after a failed transaction; or use pgproj publish --execute --concurrently.";
 
-    /// <summary>A printed or written script for tenants: each part is meant to be its own transaction, which <c>--execute</c> does.</summary>
+    /// <summary>
+    /// A printed or written script for tenants (G-290): each part carries a transaction of its own (G-165), as <c>--execute</c> runs them, so a part that
+    /// fails leaves the parts before it committed, and a client that goes on after an error runs the parts after it.
+    /// </summary>
     public const string TenantScriptWarning =
-        "Warning: the script is not wrapped in transactions. pgproj publish --execute runs the shared part, then each tenant's part (after its \"-- pgproj: tenant\" line), in a transaction of its own; "
-        + "run each part inside one yourself (BEGIN; ... COMMIT;) if you run the script with psql.";
+        "Warning: the shared part and each tenant's part (after its \"-- pgproj: tenant\" line) are transactions of their own, as pgproj publish --execute runs them: "
+        + "a part that fails is rolled back and leaves the parts before it committed. Run the script with psql -v ON_ERROR_STOP=1 -f <file>, so it stops at the part that fails.";
+
+    /// <summary>The variables pgproj sets for a tenant's scripts (G-290e); the environment may not give them (G-336).</summary>
+    public static bool IsTenantVariable(string name) => name is "tenant_schema" or "tenant_id";
+
+    /// <summary>
+    /// What is wrong with a request's <see cref="PublishRequest.Variables"/> (G-336), or null: a name psql's variable syntax cannot spell (letters, digits,
+    /// and <c>_</c>), or a tenant's variable, which pgproj sets.
+    /// </summary>
+    public static string? VariablesProblem(IReadOnlyDictionary<string, string> variables)
+    {
+        ArgumentNullException.ThrowIfNull(variables);
+
+        var badNames = variables.Keys.Where(static name => name.Length == 0 || !name.All(static character => char.IsLetterOrDigit(character) || character == '_')).ToArray();
+        if (badNames.Length > 0)
+        {
+            return $"a variable's name may hold only letters, digits, and _: {string.Join(", ", badNames.Select(static name => $"\"{name}\""))}.";
+        }
+
+        var tenantNames = variables.Keys.Where(IsTenantVariable).ToArray();
+        return tenantNames.Length > 0
+            ? $"{string.Join(" and ", tenantNames)} {(tenantNames.Length == 1 ? "is" : "are")} set by pgproj for each tenant and cannot be given as a variable ({string.Join(", ", tenantNames.Select(static name => VariablePrefix + name))})."
+            : null;
+    }
+
+    /// <summary>The prefix of the environment variables the CLI reads a script's variables from (G-336): <c>PGPROJ_VAR_app_password</c> is <c>:'app_password'</c>.</summary>
+    public const string VariablePrefix = "PGPROJ_VAR_";
+
+    /// <summary>The variables the scripts of <paramref name="scripts"/> use, each once, in order (G-336); a tenant's values are already in them.</summary>
+    public static IReadOnlyList<string> VariablesUsed(IEnumerable<string> scripts)
+        => scripts.SelectMany(PgProj.Parser.ScriptVariables.Names).Distinct(StringComparer.Ordinal).ToArray();
+
+    /// <summary>The note for a printed or written script that uses variables (G-336): it keeps them, and how to run it.</summary>
+    public static string DescribeVariablesKept(IReadOnlyList<string> names)
+        => $"Warning: the script uses {Names(names)}, which only pgproj publish --execute fills in (from {VariablePrefix}<name>); the script keeps them as written. "
+            + $"Run it with psql {string.Join(" ", names.Select(static name => $"-v {name}=..."))} -f <file>.";
+
+    /// <summary>The refusal of <c>--execute</c> when a variable the script uses has no value (G-336).</summary>
+    public static string DescribeVariablesMissing(IReadOnlyList<string> missing)
+        => $"Publish failed: the script uses {Names(missing)}, which {(missing.Count == 1 ? "has" : "have")} no value, so nothing was run. "
+            + $"Set {string.Join(", ", missing.Select(static name => VariablePrefix + name))} in the environment.";
+
+    /// <summary>
+    /// The names <c>--apply-secrets</c> lists that no user mapping's options use (G-347), in the order given; none when it lists no names (every variable) or is
+    /// not given. A name that matches nothing would send nothing, and the run used to report success.
+    /// </summary>
+    public static IReadOnlyList<string> UnknownSecrets(IReadOnlyList<string>? applySecrets, DatabaseModel model)
+    {
+        if (applySecrets is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        var known = SecretVariables(model).ToHashSet(StringComparer.Ordinal);
+        return [.. applySecrets.Where(name => !known.Contains(name)).Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The variables the project's user mappings' options use, which <c>--apply-secrets</c> can send (G-347).</summary>
+    public static IReadOnlyList<string> SecretVariables(DatabaseModel model)
+        => [.. model.UserMappings.Values.SelectMany(static mapping => mapping.Options).Select(static option => option.Variable).OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+    /// <summary>What <c>publish</c> says of <c>--apply-secrets</c> names no user mapping uses (G-347): with <c>--execute</c> it refuses before anything runs.</summary>
+    public static string DescribeUnknownSecrets(IReadOnlyList<string> unknown, IReadOnlyList<string> known, bool executing)
+    {
+        var lead = executing ? "Publish failed: " : "Warning: ";
+        var outcome = executing ? "so nothing was run" : "and publish --execute refuses it";
+        var usable = known.Count == 0 ? "The project's user mappings use no variable." : $"The project's user mappings use {Names(known)}.";
+        return $"{lead}--apply-secrets names {Names(unknown)}, which no user mapping's options use, {outcome}. {usable}";
+    }
+
+    private static string Names(IReadOnlyList<string> names) => string.Join(", ", names.Select(static name => $":'{name}'"));
 
     /// <summary>A duration PostgreSQL's <c>lock_timeout</c> accepts: a number with an optional unit (<c>us</c>, <c>ms</c>, <c>s</c>, <c>min</c>, <c>h</c>, <c>d</c>), milliseconds without one (G-270).</summary>
     public static bool IsDuration(string value)

@@ -131,6 +131,17 @@ internal static class OwnerDeclarations
                     ? new Target("publication", publication.Key, null, publication.Name, publication)
                     : null;
 
+            // A foreign data wrapper or server (G-132); a wrapper's owner must be a superuser.
+            case "ForeignDataWrapper":
+                return model.ForeignDataWrappers.TryGetValue(ForeignDataKeys.Wrapper(name), out var wrapper)
+                    ? new Target("foreign data wrapper", wrapper.Key, null, wrapper.Name, wrapper)
+                    : null;
+
+            case "ForeignServer":
+                return model.ForeignServers.TryGetValue(ForeignDataKeys.Server(name), out var server)
+                    ? new Target("server", server.Key, null, server.Name, server)
+                    : null;
+
             case "Collation":
                 return model.Collations.TryGetValue(DatabaseModel.CreateCollationKey(node.SchemaName, name), out var collation)
                     ? new Target("collation", collation.Key, collation.SchemaName, collation.Name, collation)

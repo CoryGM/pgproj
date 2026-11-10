@@ -278,7 +278,7 @@ jobs:
   macos:
     name: macOS (osx-arm64)
     needs: [version, windows]
-    runs-on: macos-14 # Apple silicon
+    runs-on: macos-15 # Apple silicon (arm64); macos-14 was retired from GitHub Actions on 2026-11-02
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -340,7 +340,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14] # linux-x64, win-x64, osx-arm64
+        os: [ubuntu-latest, windows-latest, macos-15] # linux-x64, win-x64, osx-arm64
     steps:
       - uses: actions/checkout@v7
 

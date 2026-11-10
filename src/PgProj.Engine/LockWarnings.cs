@@ -40,7 +40,8 @@ internal static partial class LockWarnings
         {
             switch (operation)
             {
-                case AlterOperation { Change: { OldNode: TableDefinition oldTable, NewNode: TableDefinition newTable } }:
+                // A foreign table keeps no rows here, so nothing is rewritten or scanned (G-133).
+                case AlterOperation { Change: { OldNode: TableDefinition { IsForeign: false } oldTable, NewNode: TableDefinition { IsForeign: false } newTable } }:
                     AddTableChanges(warnings, oldTable, newTable, project);
                     break;
                 case CreateOperation { Node: IndexDefinition index, OnlyParent: false } when Exists(live, index.SchemaName, index.TableName):
@@ -48,6 +49,22 @@ internal static partial class LockWarnings
                     break;
                 case CreateOperation { Node: ConstraintDefinition constraint } when Exists(live, constraint.SchemaName, constraint.TableName):
                     AddConstraint(warnings, constraint);
+                    break;
+                // An enum type rebuilt under its columns (G-191) changes each column's type, which rewrites its table.
+                case EnumSwapOperation swap:
+                    foreach (var column in swap.Columns)
+                    {
+                        warnings.Add(new LockWarning(Key(column.SchemaName, column.TableName), $"ALTER COLUMN {column.ColumnName} TYPE (enum {swap.NodeId} rebuilt)", "rewrites the table and its indexes under an ACCESS EXCLUSIVE lock"));
+                    }
+
+                    break;
+                // A composite type rebuilt under its columns (G-119), the same.
+                case CompositeSwapOperation swap:
+                    foreach (var column in swap.Columns)
+                    {
+                        warnings.Add(new LockWarning(Key(column.SchemaName, column.TableName), $"ALTER COLUMN {column.ColumnName} TYPE (composite {swap.NodeId} rebuilt)", "rewrites the table and its indexes under an ACCESS EXCLUSIVE lock"));
+                    }
+
                     break;
             }
         }
@@ -227,8 +244,9 @@ internal static partial class LockWarnings
         };
     }
 
+    /// <summary>True when <paramref name="live"/> has the table with rows of its own: a foreign table's are its server's, so nothing here is scanned or rewritten (G-133).</summary>
     private static bool Exists(DatabaseModel live, string? schemaName, string? tableName)
-        => tableName is not null && live.Tables.ContainsKey(Key(schemaName, tableName));
+        => tableName is not null && live.Tables.TryGetValue(Key(schemaName, tableName), out var table) && !table.IsForeign;
 
     private static string Key(string? schemaName, string? tableName) => DatabaseModel.CreateKey(schemaName, tableName ?? string.Empty);
 

@@ -75,6 +75,27 @@ public sealed class ColumnTypeWideningTests
         Assert.AreEqual("column \"c\" type changed (varchar(50) -> varchar(10))", reason);
     }
 
+    [TestMethod]
+    [DataRow("varchar(50)", "varchar(100)", true)]
+    [DataRow("varchar(50)", "text", true)]
+    [DataRow("numeric(10,2)", "numeric(11,3)", true)]
+    [DataRow("int", "bigint", true)]
+    [DataRow("int[]", "bigint[]", true)]
+    [DataRow("varchar(50)", "varchar(10)", false)]
+    [DataRow("numeric(10,3)", "numeric(10,2)", false)]
+    [DataRow("bigint", "int", false)]
+    [DataRow("int", "int[]", false)]
+    [DataRow("text", "int", false)]
+    public void ACompositeFieldFollowsTheColumnsRule(string oldType, string newType, bool keeps)
+    {
+        // G-119: a field is compared by its comparable type, the form a column's is compared in.
+        Assert.AreEqual(keeps, ColumnTypeWidening.KeepsEveryValue(FieldType(oldType), FieldType(newType)), $"{oldType} -> {newType}");
+        Assert.AreEqual(ColumnTypeWidening.KeepsEveryValue(Column(oldType), Column(newType)), keeps, "the same answer as for a column");
+    }
+
+    private static string? FieldType(string type)
+        => Build($"CREATE TYPE public.f AS (c {type});").Types["public.f"].CompositeFields.Single().ComparableType;
+
     private static ColumnDefinition Column(string type)
         => Build($"CREATE TABLE public.t (id int PRIMARY KEY, c {type});").Tables["public.t"].Columns.Single(static column => column.Name == "c");
 

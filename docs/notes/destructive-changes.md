@@ -11,13 +11,16 @@
 - a dropped materialized view (its computed data is lost until it is refreshed), including one dropped to be rebuilt around a change to what it uses;
 - a dropped extension (every object it owns is dropped with it);
 - a dropped field of a composite type (`ALTER TYPE ... DROP ATTRIBUTE`; the values it holds in stored rows are lost);
+- a field of a composite type that columns use retyped to a type not known to hold every value (`varchar(10)` to `varchar(5)`; the type is rebuilt under
+  them, and a value that does not fit stops the publish, [composite types](composite-types.md));
+- a label removed from an enum type that columns use (the type is rebuilt under them; a row that holds the label stops the publish, [enum types](enum-types.md));
 - a dropped cast, operator, aggregate, rule, publication, or event trigger that the script does not create again (one that is changed is dropped and created again, which loses nothing);
-- a revoked grant or role membership (a genuine `REVOKE`, not a narrower re-grant), unless `excludeGrants`/`excludeRoleMemberships` leaves it out of the model;
+- a revoked grant or role membership (a genuine `REVOKE`, not a narrower re-grant), unless `excludeGrants`/`excludeRoleMemberships` leaves it out of the model, and `PUBLIC`'s default taken away from a type, domain, or routine that already exists ([type privileges](type-privileges.md), [routine privileges](routine-privileges.md)), or from the `public` schema, which always exists ([public schema privileges](public-schema-privileges.md));
 - a changed owner of an existing object, since the old owner loses the privileges it had as the owner (setting the owner of a new object is not destructive).
 
 This is deliberately conservative: any column type change is treated as destructive, even a widening one PostgreSQL could apply losslessly (`integer` to `bigint`), because telling a safe widening from a truncating narrowing in general needs per-type knowledge pgproj does not attempt. Rebuilding an index, a constraint, a plain view, a type, or a function, procedure, or trigger from source is not destructive, even when it is deployed as drop and create, since nothing is lost. A changed partition strategy or key is not covered by `--allow-destructive` at all: `publish` refuses it with no way to proceed.
 
-`--output`/`--dry-run` always show the full script regardless of this check. `--execute` runs the script in a single transaction, so a failure partway leaves nothing applied; a script that is only printed or written is not wrapped in one (`publish` warns so), and should be run inside a transaction (`psql --single-transaction -f deploy.sql`) to get the same guarantee (deferred).
+`--output`/`--dry-run` always show the full script regardless of this check. `--execute` runs the script in a single transaction, so a failure partway leaves nothing applied; a script that is printed or written carries the same transaction (`BEGIN;` ... `COMMIT;`), so `psql -f deploy.sql` gives the same guarantee.
 
 `publish --comments-only` deploys nothing but `COMMENT ON` statements, so this check does not apply to it ([Publishing only the comments](comments-only.md)).
 
