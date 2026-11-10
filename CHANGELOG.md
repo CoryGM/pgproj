@@ -65,6 +65,13 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   built-in `USAGE` on types or `EXECUTE` on functions included, and pgproj read that entry as a rule the project did not state, so `diff` reported it after
   every publish and `publish` planned `ALTER DEFAULT PRIVILEGES REVOKE ALL PRIVILEGES ON TYPES FROM PUBLIC`, a destructive change. It is now PostgreSQL's
   default and is not compared, and `init` no longer writes it ([Default privileges](docs/notes/default-privileges.md)).
+- **`PUBLIC`'s privileges on the `public` schema are compared:** before, a database that had revoked `PUBLIC`'s `USAGE` on `public` showed no
+  difference, and a project's `REVOKE ... ON SCHEMA public FROM PUBLIC` was a warning and ignored. `REVOKE USAGE`, `CREATE`, or `ALL ON SCHEMA public FROM
+  PUBLIC` (the form `pg_dump` writes) is now read, deployed, compared, and written by `init` in `Schema/public/public.sql`; taking a privilege away needs
+  `--allow-destructive`, on a new database too, since `public` always exists. A project that says nothing wants `USAGE` for `PUBLIC`, PostgreSQL's
+  default. `CREATE`, which `PUBLIC` has there only on PostgreSQL 14, is compared only when the project revokes it, and never given back. **If a database
+  revoked `PUBLIC`'s `USAGE` on `public` and the project does not say so, `diff` now reports it, and `publish` gives it back** after the warning: add the
+  `REVOKE` to the project (`init` writes it), or set `excludeGrants` ([Privileges on the public schema](docs/notes/public-schema-privileges.md)).
 
 ### Library
 

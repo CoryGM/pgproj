@@ -7,8 +7,8 @@ using PgProj.Semantics;
 namespace PgProj.Engine.Tests;
 
 /// <summary>
-/// G-337, G-338: <c>publish</c> names each statement that gives <c>PUBLIC</c> a privilege on an object the database already has, which <c>--allow-destructive</c> does
-/// not cover: a type's <c>USAGE</c> given back because the project does not revoke it, and a grant to <c>PUBLIC</c> the project adds on a table, sequence,
+/// G-337, G-338, G-341: <c>publish</c> names each statement that gives <c>PUBLIC</c> a privilege on an object the database already has, which <c>--allow-destructive</c>
+/// does not cover: a type's, routine's, or the <c>public</c> schema's default given back because the project does not revoke it, and a grant to <c>PUBLIC</c> the project adds on a table, sequence,
 /// routine, type, or schema that exists. Not a grant on an object the script creates, one the database already had, or one to a role.
 /// </summary>
 [TestClass]
@@ -98,6 +98,20 @@ public sealed class PublicGrantsTests
         StringAssert.Contains(warning, "every function and procedure created from now on: every role can execute it.");
         StringAssert.Contains(warning, "ALTER DEFAULT PRIVILEGES GRANT ALL PRIVILEGES ON FUNCTIONS TO PUBLIC;");
         StringAssert.Contains(warning, "ALTER DEFAULT PRIVILEGES REVOKE ALL PRIVILEGES ON FUNCTIONS FROM PUBLIC;");
+    }
+
+    [TestMethod]
+    public void ThePublicSchemasUsageGivenBackIsNamedWithWhatItMeansAndHowToKeepItRevoked()
+    {
+        // G-341: the database has PUBLIC's USAGE on the public schema revoked (and, as on PostgreSQL 15 and later, no CREATE); the project says nothing.
+        const string live = "REVOKE ALL ON SCHEMA public FROM PUBLIC;";
+        var found = PublicGrants.Find(Batch(live, ""), Build(live));
+
+        Assert.AreEqual("GRANT USAGE ON SCHEMA \"public\" TO PUBLIC;", found.Single().Statement, "CREATE is never given back.");
+        Assert.AreEqual(PublicGrantReason.DefaultGivenBack, found.Single().Reason);
+        var warning = PublicGrants.Describe(found);
+        StringAssert.Contains(warning, "schema public: every role can look up the objects in it, and use each one its own privileges allow.");
+        StringAssert.Contains(warning, "REVOKE USAGE ON SCHEMA \"public\" FROM PUBLIC;");
     }
 
     [TestMethod]

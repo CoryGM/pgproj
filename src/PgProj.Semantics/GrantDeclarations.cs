@@ -79,9 +79,15 @@ internal static class GrantDeclarations
     /// adds to the global one), so it is a warning that says so.</item>
     /// </list>
     /// A grantee other than <c>PUBLIC</c> in the same statement is not read (a project states what it grants, and pgproj revokes the rest), and says so.
+    /// The <c>public</c> schema's defaults are read by <see cref="DeclarePublicSchemaRevokes"/> (G-341).
     /// </summary>
     private static List<GrantDefinition>? DeclareRevokedDefaults(GrantNode node, ICollection<SemanticDiagnostic> diagnostics, SemanticLocation? location)
     {
+        if (node.ObjectKind == "schema")
+        {
+            return DeclarePublicSchemaRevokes(node, diagnostics, location);
+        }
+
         var defaultPrivilege = node.ObjectKind switch
         {
             "type" or "domain" => "USAGE",
@@ -103,7 +109,7 @@ internal static class GrantDeclarations
         if (others.Length > 0)
         {
             diagnostics.Add(SemanticDiagnostics.Warning(
-                $"REVOKE ... FROM {string.Join(", ", others)} is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest. Only REVOKE ... FROM PUBLIC is read on a type, domain, function, or procedure, and in ALTER DEFAULT PRIVILEGES on types and functions.",
+                $"REVOKE ... FROM {string.Join(", ", others)} is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest. Only REVOKE ... FROM PUBLIC is read on a type, domain, function, or procedure, on the public schema, and in ALTER DEFAULT PRIVILEGES on types and functions.",
                 location,
                 nameof(DeclarationPass)));
         }
@@ -140,6 +146,53 @@ internal static class GrantDeclarations
             })
             .ToList();
     }
+
+    /// <summary>
+    /// <c>REVOKE USAGE|CREATE|ALL ON SCHEMA public FROM PUBLIC</c> (G-341, approved by the user on 2026-11-10): one <see cref="GrantDefinition.RevokesDefault"/>
+    /// definition per privilege the statement takes from <c>PUBLIC</c>, on the schema named <c>public</c>, the only schema PostgreSQL gives <c>PUBLIC</c> anything on.
+    /// <c>USAGE</c> is G-337's option (B): a project that says nothing wants the default. <c>CREATE</c>, which <c>PUBLIC</c> has there by default only before PostgreSQL
+    /// 15, is compared only when stated, so pgproj never gives it back. Null when the statement names no such privilege on <c>public</c> (it stays the general warning);
+    /// another schema it names, and a grantee other than <c>PUBLIC</c>, are warned about and not read.
+    /// </summary>
+    private static List<GrantDefinition>? DeclarePublicSchemaRevokes(GrantNode node, ICollection<SemanticDiagnostic> diagnostics, SemanticLocation? location)
+    {
+        var readable = node.Form == GrantForm.Object
+            && !node.WithGrantOption
+            // ALL [PRIVILEGES] is read as no privilege named.
+            && node.Privileges.All(static privilege => privilege.Columns.Count == 0 && privilege.Name is "USAGE" or "CREATE" or "ALL" or AllPrivileges)
+            && node.Targets.Any(static target => target.Name == PublicSchema)
+            && node.Grantees.Any(IsPublic);
+        if (!readable)
+        {
+            return null;
+        }
+
+        var otherSchemas = node.Targets.Where(static target => target.Name != PublicSchema).Select(static target => target.Name).Distinct(StringComparer.Ordinal).ToArray();
+        if (otherSchemas.Length > 0)
+        {
+            diagnostics.Add(SemanticDiagnostics.Warning(
+                $"REVOKE ... ON SCHEMA {string.Join(", ", otherSchemas)} FROM PUBLIC is not modeled and is ignored: PUBLIC has no privilege on a schema other than public unless a project grants it, and a project states the privileges it wants with GRANT. Only the public schema's part of the statement is read.",
+                location,
+                nameof(DeclarationPass)));
+        }
+
+        var others = node.Grantees.Where(static grantee => !IsPublic(grantee)).Distinct(StringComparer.Ordinal).ToArray();
+        if (others.Length > 0)
+        {
+            diagnostics.Add(SemanticDiagnostics.Warning(
+                $"REVOKE ... FROM {string.Join(", ", others)} is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest. Only REVOKE ... FROM PUBLIC is read on the public schema.",
+                location,
+                nameof(DeclarationPass)));
+        }
+
+        var all = node.Privileges.Count == 0 || node.Privileges.Any(static privilege => privilege.Name is "ALL" or AllPrivileges);
+        return new[] { "USAGE", "CREATE" }
+            .Where(privilege => all || node.Privileges.Any(written => written.Name == privilege))
+            .Select(privilege => CreateDefinition(PublicSchema, $"schema:{PublicSchema}", PublicSchema, "PUBLIC", [privilege], columns: [], withGrantOption: false, forRole: null, revokesDefault: true))
+            .ToList();
+    }
+
+    private const string PublicSchema = "public";
 
     private static bool IsPublic(string grantee) => string.Equals(grantee, "PUBLIC", StringComparison.OrdinalIgnoreCase);
     private static readonly string[] AllInSchemaKinds = ["table", "sequence", "function"];

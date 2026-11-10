@@ -7,7 +7,7 @@ namespace PgProj.Engine;
 /// <summary>Why a statement of a script gives <c>PUBLIC</c> a privilege it does not have now.</summary>
 internal enum PublicGrantReason
 {
-    /// <summary>PostgreSQL's default on a type, domain, function, or procedure is given back: the database has it revoked and the project does not (G-337, G-338).</summary>
+    /// <summary>PostgreSQL's default on a type, domain, function, procedure, or the public schema is given back: the database has it revoked and the project does not (G-337, G-338, G-341).</summary>
     DefaultGivenBack,
 
     /// <summary>A rule for new types or functions is given its default back: the database revokes it and the project does not (G-338, part (i)).</summary>
@@ -25,7 +25,7 @@ internal sealed record PublicGrant(string Statement, PublicGrantReason Reason, s
 
 /// <summary>
 /// The statements of a script that give <c>PUBLIC</c>, every role, a privilege it does not have now (G-337 and G-338, the user's decisions of 2026-11-09 and
-/// 2026-11-10): a grant to <c>PUBLIC</c> the project adds on an object the database already has; PostgreSQL's default on a type, domain, function, or procedure given
+/// 2026-11-10): a grant to <c>PUBLIC</c> the project adds on an object the database already has; PostgreSQL's default on a type, domain, function, procedure, or the public schema (G-341) given
 /// back because the project does not revoke it; and a rule for new types or functions given its default back. None takes anything away, so <c>--allow-destructive</c>
 /// does not cover them, but each widens access, which the warning spells out (the user: "make sure the warning is VERY explicit"). A grant on an object the script
 /// creates, one the object already had, and one put back on an object dropped and created again are not named.
@@ -70,9 +70,13 @@ internal static class PublicGrants
                 continue;
             }
 
-            var isType = grant.ObjectKey?.StartsWith("type:", StringComparison.Ordinal) == true;
+            var objectKey = grant.ObjectKey ?? string.Empty;
+            var effect = objectKey.StartsWith("type:", StringComparison.Ordinal) ? "every role can use it"
+                // The public schema's USAGE (G-341): what is in it becomes reachable by name, each object still behind its own privileges.
+                : objectKey.StartsWith("schema:", StringComparison.Ordinal) ? "every role can look up the objects in it, and use each one its own privileges allow"
+                : "every role can execute it";
             var subject = Subject(grant) + (IsSecurityDefiner(grant, live) ? " (SECURITY DEFINER: it runs with its owner's privileges, whoever calls it)" : string.Empty);
-            found.Add(new PublicGrant(statement, PublicGrantReason.DefaultGivenBack, subject, isType ? "every role can use it" : "every role can execute it", keepRevoked));
+            found.Add(new PublicGrant(statement, PublicGrantReason.DefaultGivenBack, subject, effect, keepRevoked));
         }
 
         return found;

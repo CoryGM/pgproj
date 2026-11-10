@@ -870,7 +870,9 @@ public sealed class DiffEngine
     /// (G-338, part (i)), each a <see cref="GrantDefinition.RevokesDefault"/> compared by what it names: one only the project has is added (the default is taken
     /// away), and one only the database has is removed (<c>PUBLIC</c> is given its privilege back). Not removed: one on an object the project drops, which takes its
     /// privileges with it, and one on a type or routine the project's own rule would create without the default (allowed, not required; G-339's option (c)). A
-    /// rule <c>FOR ROLE</c> the role that deploys is the same as one without <c>FOR ROLE</c>.
+    /// rule <c>FOR ROLE</c> the role that deploys is the same as one without <c>FOR ROLE</c>. On the <c>public</c> schema (G-341) a revoke is one per privilege:
+    /// <c>USAGE</c> is compared both ways, and <c>CREATE</c> (<c>PUBLIC</c>'s default there before PostgreSQL 15) only when the project states it, so a project that
+    /// does not is never made to give <c>CREATE</c> back.
     /// </summary>
     private static void DiffRevokedDefaults(
         DatabaseModel oldModel,
@@ -881,8 +883,10 @@ public sealed class DiffEngine
         ICollection<RemovedChange> removed)
     {
         var connectedRole = oldModel.ConnectedRole;
-        (string ObjectKey, string? ForRole) Identity(GrantDefinition grant)
-            => (grant.ObjectKey ?? string.Empty, grant.ForRole is not null && string.Equals(grant.ForRole, connectedRole, StringComparison.OrdinalIgnoreCase) ? null : grant.ForRole);
+        (string ObjectKey, string? ForRole, string Privileges) Identity(GrantDefinition grant)
+            => (grant.ObjectKey ?? string.Empty,
+                grant.ForRole is not null && string.Equals(grant.ForRole, connectedRole, StringComparison.OrdinalIgnoreCase) ? null : grant.ForRole,
+                string.Join(",", grant.Privileges.Order(StringComparer.Ordinal)));
 
         var oldIdentities = oldGrants.Where(static grant => grant.RevokesDefault).Select(Identity).ToHashSet();
         var newIdentities = newGrants.Where(static grant => grant.RevokesDefault).Select(Identity).ToHashSet();
@@ -890,7 +894,9 @@ public sealed class DiffEngine
         foreach (var oldGrant in oldGrants.Where(grant => grant.RevokesDefault && !newIdentities.Contains(Identity(grant))))
         {
             var objectKey = oldGrant.ObjectKey ?? string.Empty;
-            if ((oldGrant.ObjectName is not null && !ProjectHasObject(newModel, oldGrant)) || GrantExpansion.RevokesDefaultByRule(newModel, objectKey))
+            if ((oldGrant.ObjectName is not null && !ProjectHasObject(newModel, oldGrant))
+                || GrantExpansion.RevokesDefaultByRule(newModel, objectKey)
+                || IsPublicSchemaCreateRevoke(oldGrant))
             {
                 continue;
             }
@@ -903,6 +909,10 @@ public sealed class DiffEngine
             added.Add(new AddedChange { NodeId = newGrant.Key, NodeKind = ChangeRecord.MapKind(newGrant), Node = newGrant });
         }
     }
+
+    /// <summary><c>REVOKE CREATE ON SCHEMA public FROM PUBLIC</c> (G-341): compared only when the project states it.</summary>
+    private static bool IsPublicSchemaCreateRevoke(GrantDefinition grant)
+        => grant.ObjectKey == "schema:public" && grant.Privileges.Contains("CREATE", StringComparer.Ordinal);
 
     /// <summary>Whether <paramref name="model"/> has the type, function, or procedure a revoked default names.</summary>
     private static bool ProjectHasObject(DatabaseModel model, GrantDefinition revoked)

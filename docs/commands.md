@@ -274,7 +274,7 @@ and an object in the way of a change (a view on a column whose type changes, say
   routine's body uses from being dropped, renamed, or retyped, and the routine fails when it runs. `diff` and `publish` say which routine names what ([PL/pgSQL bodies](notes/plpgsql-bodies.md)).
 - **A privilege given to `PUBLIC` is spelled out.** Before anything runs, a warning lists each statement that gives `PUBLIC` (every role, including roles
   created later) a privilege it does not have now, what every role can then do, and the `REVOKE` that keeps it revoked: PostgreSQL's default given back to a
-  type, domain, function, or procedure the database has it revoked on, because the project does not revoke it (a `SECURITY DEFINER` routine is marked); a
+  type, domain, function, procedure, or the `public` schema the database has it revoked on, because the project does not revoke it (a `SECURITY DEFINER` routine is marked); a
   default-privileges rule that revokes it the project removes; and a grant to `PUBLIC` the project adds on an object that exists. It takes nothing away, so
   `--allow-destructive` does not cover it ([routine privileges](notes/routine-privileges.md), [type privileges](notes/type-privileges.md)).
 - **Schemas are never dropped.** A schema the project no longer uses is left in place (its objects are dropped as usual), and `diff` and

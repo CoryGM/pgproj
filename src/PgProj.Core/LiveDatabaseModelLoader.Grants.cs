@@ -18,6 +18,7 @@ public sealed partial class LiveDatabaseModelLoader
     {
         var grants = new List<LiveGrantSnapshot>();
         grants.AddRange(await ReadSchemaGrantsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadPublicSchemaRevokedDefaultsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadObjectGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadColumnGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadDefaultPrivilegesGrantsAsync(connection, scopeSchemas, cancellationToken));
@@ -65,6 +66,40 @@ public sealed partial class LiveDatabaseModelLoader
                 $"schema:{schemaName}",
                 grantee,
                 $"GRANT {privileges} ON SCHEMA {RenderIdentifier(schemaName)} TO {RenderGrantee(grantee)}{grantOption}"));
+        }
+
+        return grants;
+    }
+
+    /// <summary>
+    /// The <c>public</c> schema without a privilege PostgreSQL gives <c>PUBLIC</c> on it (G-341), as <c>REVOKE USAGE|CREATE ON SCHEMA public FROM PUBLIC</c>, the form
+    /// <c>pg_dump</c> writes: <c>USAGE</c> on every version, <c>CREATE</c> by default only before PostgreSQL 15 (on 15 and later every database reads as without it,
+    /// which a project that does not state it does not compare). A null list is the owner's alone (<c>acldefault</c>): a <c>public</c> schema created again by hand
+    /// has neither.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadPublicSchemaRevokedDefaultsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
+    {
+        const string publicSchemaSql =
+            """
+            select exists (select 1 from pg_catalog.aclexplode(coalesce(ns.nspacl, pg_catalog.acldefault('n', ns.nspowner))) acl where acl.grantee = 0 and acl.privilege_type = 'USAGE') as has_usage,
+                   exists (select 1 from pg_catalog.aclexplode(coalesce(ns.nspacl, pg_catalog.acldefault('n', ns.nspowner))) acl where acl.grantee = 0 and acl.privilege_type = 'CREATE') as has_create
+            from pg_catalog.pg_namespace ns
+            where ns.nspname = 'public'
+              and (@schemas is null or ns.nspname = any(@schemas));
+            """;
+
+        var grants = new List<LiveGrantSnapshot>();
+        await using var command = CreateCommand(publicSchemaSql, connection, scopeSchemas);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            foreach (var (privilege, has) in new[] { ("USAGE", reader.GetBoolean(0)), ("CREATE", reader.GetBoolean(1)) })
+            {
+                if (!has)
+                {
+                    grants.Add(new LiveGrantSnapshot("public", "schema:public", "PUBLIC", $"REVOKE {privilege} ON SCHEMA {RenderIdentifier("public")} FROM PUBLIC"));
+                }
+            }
         }
 
         return grants;

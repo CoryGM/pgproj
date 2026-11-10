@@ -26,6 +26,8 @@ public readonly record struct GrantAtom(string Target, string Grantee, string Pr
             && Privilege == "USAGE"
             && !WithGrantOption
             && Target.StartsWith("type:", StringComparison.Ordinal))
+        // The public schema's USAGE for PUBLIC is PostgreSQL's default too, and one a project can take away (G-341): whether the schema has it is decided by a
+        // GrantDefinition.RevokesDefault definition, compared by its key, not by atoms.
         || (Grantee == "public"
             && Privilege == "USAGE"
             && !WithGrantOption

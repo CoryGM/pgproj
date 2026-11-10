@@ -83,7 +83,7 @@ public sealed partial class LiveDatabaseModelLoader
             var statistics = await ReadStatisticsAsync(connection, scope, cancellationToken);
             var textSearch = await ReadTextSearchAsync(connection, scope, cancellationToken);
             var publications = await ReadPublicationsAsync(connection, scope, cancellationToken);
-            var allGrants = await ReadGrantsAsync(connection, scope, cancellationToken);
+            var allGrants = WithoutServerDefaultRevokes(await ReadGrantsAsync(connection, scope, cancellationToken), connection.PostgreSqlVersion.Major);
             var grants = FilterGrantsForScaffold(allGrants, options.ExcludeGrants, options.ExcludeRoleMemberships);
 
             // Owners are always read, for the report (who owns what was modeled, and how many an option left out); they go into the files unless excluded.
@@ -316,6 +316,16 @@ public sealed partial class LiveDatabaseModelLoader
 
         return references;
     }
+
+    /// <summary>
+    /// The revokes that only restate the server's own default, which a new project does not need (G-341): from PostgreSQL 15, <c>PUBLIC</c> has no <c>CREATE</c> on
+    /// the <c>public</c> schema, so every such database reads as <c>REVOKE CREATE ON SCHEMA public FROM PUBLIC</c>, which <c>init</c> leaves out. On 14 it is a
+    /// revoke someone made, and is written.
+    /// </summary>
+    internal static IReadOnlyList<LiveGrantSnapshot> WithoutServerDefaultRevokes(IReadOnlyList<LiveGrantSnapshot> grants, int serverMajorVersion)
+        => serverMajorVersion < 15
+            ? grants
+            : grants.Where(static grant => !(grant.ObjectKey == "schema:public" && grant.Statement.StartsWith("REVOKE CREATE ", StringComparison.Ordinal))).ToArray();
 
     /// <summary>
     /// G-87: applied after the read (not by skipping the query above) so the read stays identical to

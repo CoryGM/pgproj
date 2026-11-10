@@ -176,7 +176,8 @@ public sealed record class OperationBatch
             DropOperation { Node: GrantDefinition grant } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [DescribeGrantRevocation(grant)] },
             // Taking PUBLIC's default away from a type or routine that exists is a revoke (G-337, G-338); on one created in this script, or given back to one
-            // recreated, it is not. A rule for new types or functions (ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC) changes nothing that exists.
+            // recreated, it is not. A rule for new types or functions (ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC) changes nothing that exists. The public
+            // schema always exists (pgproj never creates it), so taking its USAGE or CREATE from PUBLIC is always a revoke (G-341, the user's choice of 2026-11-10).
             CreateOperation { Node: GrantDefinition { RevokesDefault: true, ObjectName: not null } revoked, IsRestored: false } create when !newObjectKeys.Contains(revoked.ObjectKey ?? string.Empty)
                 => new DestructiveOperation { Operation = create, Reasons = [$"grant revoked: {GrantSqlBuilder.Grant(revoked).TrimEnd(';')}"] },
             // A changed owner takes the old owner's privileges away and puts them on the new one, which is an access-loss event for whoever relied on them (G-146);
