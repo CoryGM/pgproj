@@ -76,7 +76,8 @@ a project states each foreign table it wants.
 - **Dropping a foreign table** stops every query that reads it, so it needs `--allow-destructive`. Its rows are the server's, so dropping or changing a
   column, or a move to another server, loses none and needs no consent. An ordinary table that becomes a foreign one loses its rows and needs it.
 - **A server that has to be dropped and created again** (a changed wrapper or `TYPE`) is refused while a foreign table is on it.
-- `init` writes each one to `Schema/<schema>/ForeignTable/<name>.sql`, with its triggers, statistics, comments, grants, and owner.
+- `init` writes each one to `Schema/<schema>/ForeignTable/<name>.sql`, with its triggers, statistics, comments, grants, and owner. A privilege a role
+  holds on every table of the schema is written once in the schema's file instead, as `GRANT ... ON ALL TABLES IN SCHEMA` ([`init`](../commands.md#init)).
 ## In the database and in `init`
 
 A role can read a user mapping's options only if it is the mapped role, the server's owner, or a superuser. For any other role they are not compared, and

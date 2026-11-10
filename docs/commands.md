@@ -30,14 +30,18 @@ Scaffolds a new project from an existing database: a `pgproj.json` and one SQL f
 
 Files go in Title Case folders under the output directory:
 
-- `Schema/<schema>/<schema>.sql` for the schema itself, with its grants and default privileges.
+- `Schema/<schema>/<schema>.sql` for the schema itself, with its grants and default privileges. A privilege a role holds on every table (views and
+  foreign tables included), every sequence, or every function of the schema is written here once, as `GRANT ... ON ALL TABLES|SEQUENCES|FUNCTIONS IN
+  SCHEMA`, rather than in each object's file.
 - `Schema/<schema>/Table/<table>.sql` for a table, with its constraints, indexes, triggers, row-level security policies, rules, extended
-  statistics, and grants.
+  statistics, and grants (but for a grant written once for the whole schema, above).
+- `Schema/<schema>/ForeignTable/<table>.sql` for a foreign table, the same way ([foreign data](notes/foreign-data.md#foreign-tables)).
 - `Schema/<schema>/View/`, `Function/`, `Procedure/`, `Sequence/`, `Type/`, `Collation/`, `Aggregate/`, `Operator/`,
   `TextSearchDictionary/`, and `TextSearchConfiguration/` for the other kinds in a schema. A materialized view's indexes, and a view's
   rules, are in the view's file; a type's, domain's, function's, or procedure's privileges in its own ([type privileges](notes/type-privileges.md), [routine
   privileges](notes/routine-privileges.md)).
-- `Extension/`, `EventTrigger/`, `Cast/`, and `Publication/` at the top, for what belongs to no schema. An extension that requires others is
+- `Extension/`, `EventTrigger/`, `Cast/`, `Publication/`, `ForeignDataWrapper/`, and `Server/` (a server with its user mappings) at the top, for what belongs
+  to no schema. An extension that requires others is
   written after them, in the file of the one that sorts last ([extensions](notes/extensions.md)).
 
 Each object's owner is written beside it as `ALTER ... OWNER TO` (a sequence owned by a column has none; it follows its table). The
