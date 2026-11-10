@@ -13,6 +13,9 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ### Commands
 
+- **An index whose expression compares a column with an untyped literal converges:** `CREATE INDEX ... ((status = 'open'))` on an enum column was
+  reported changed after every `publish` and dropped and created again, since PostgreSQL stores the literal with its cast (`'open'::status`). An
+  index's expression keys are now compared as PostgreSQL renders them, as a partial index's predicate already was; what is deployed is still what you wrote.
 - **A project of more than about a thousand files no longer crashes `diff` and `publish` on Linux:** after reading the project, the command ended
   with a segmentation fault (exit code 139) and no message at its first connection to the database (seen with GitLab's schema, 2,753 files). The parser
   took one of the process's 1,024 thread-local keys for each file and never gave it back, leaving none for the TLS library; it now parses on threads it

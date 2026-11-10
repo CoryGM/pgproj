@@ -1729,7 +1729,9 @@ public sealed partial class LiveDatabaseModelLoader
                    pg_catalog.pg_get_expr(ind.indpred, ind.indrelid) as index_predicate,
                    ind.indisclustered as is_clustered,
                    ind.indisreplident as is_replica_identity,
-                   ind.indisvalid as is_valid
+                   ind.indisvalid as is_valid,
+                   -- Each key as PostgreSQL renders it, which a project's expression key is compared with (G-344).
+                   array(select pg_catalog.pg_get_indexdef(idx.oid, k, true) from pg_catalog.generate_series(1, ind.indnkeyatts) k order by k) as key_renderings
             from pg_catalog.pg_index ind
             inner join pg_catalog.pg_class idx on idx.oid = ind.indexrelid
             inner join pg_catalog.pg_class tbl on tbl.oid = ind.indrelid
@@ -1768,7 +1770,10 @@ public sealed partial class LiveDatabaseModelLoader
                 reader.IsDBNull(5) ? null : reader.GetString(5),
                 reader.GetBoolean(6),
                 reader.GetBoolean(7),
-                reader.GetBoolean(8)));
+                reader.GetBoolean(8))
+            {
+                KeyRenderings = reader.IsDBNull(9) ? [] : reader.GetFieldValue<string[]>(9),
+            });
         }
 
         return indexes;
@@ -3376,7 +3381,11 @@ internal sealed record LiveConstraintSnapshot(string SchemaName, string TableNam
     public string? IndexComment { get; init; }
 }
 
-internal sealed record LiveIndexSnapshot(string SchemaName, string TableName, string IndexName, string IndexDefinition, string? Comment = null, string? Predicate = null, bool IsClustered = false, bool IsReplicaIdentity = false, bool IsValid = true);
+internal sealed record LiveIndexSnapshot(string SchemaName, string TableName, string IndexName, string IndexDefinition, string? Comment = null, string? Predicate = null, bool IsClustered = false, bool IsReplicaIdentity = false, bool IsValid = true)
+{
+    /// <summary>Each key as PostgreSQL renders it, <c>pg_get_indexdef(index, k, true)</c>, in key order (G-344).</summary>
+    public IReadOnlyList<string> KeyRenderings { get; init; } = [];
+}
 
 internal sealed record LiveViewSnapshot(string SchemaName, string ViewName, string ViewDefinition, bool IsMaterialized = false, string? Comment = null, IReadOnlyList<string>? Options = null)
 {

@@ -1410,7 +1410,10 @@ public sealed class DiffEngine
         // are not compared on their own (G-100, as for a view in G-96 and a type in G-99): the cast PostgreSQL stores on a literal in
         // the predicate ('x'::s.st) added a referenced type the project's own predicate doesn't name.
 
-        if (!KeyElementsEqual(oldIndex.KeyElements, newIndex.KeyElements))
+        // G-344: when PostgreSQL rendered both sides' keys, an expression key is compared by its rendering, which types each literal as the stored
+        // expression does (c = 'r' on an enum is c = 'r'::color); a column, its order, class, and collation are compared as before.
+        var (oldKeys, newKeys) = WithRenderedKeys(oldIndex, newIndex);
+        if (!KeyElementsEqual(oldKeys, newKeys))
         {
             AddOrUpdateDetail(
                 details,
@@ -1450,6 +1453,35 @@ public sealed class DiffEngine
         }
 
         return details;
+    }
+
+    /// <summary>
+    /// The two indexes' keys, each expression key given its server rendering as its comparison form when both sides have one for the same number of keys (G-344);
+    /// otherwise the keys as they are.
+    /// </summary>
+    private static (IReadOnlyList<IndexKeyElementDefinition> Old, IReadOnlyList<IndexKeyElementDefinition> New) WithRenderedKeys(IndexDefinition oldIndex, IndexDefinition newIndex)
+    {
+        if (oldIndex.ServerRenderedKeys is not { } oldRendered
+            || newIndex.ServerRenderedKeys is not { } newRendered
+            || oldRendered.Count != oldIndex.KeyElements.Count
+            || newRendered.Count != newIndex.KeyElements.Count
+            || oldIndex.KeyElements.Count != newIndex.KeyElements.Count)
+        {
+            return (oldIndex.KeyElements, newIndex.KeyElements);
+        }
+
+        var oldKeys = oldIndex.KeyElements.ToArray();
+        var newKeys = newIndex.KeyElements.ToArray();
+        for (var key = 0; key < oldKeys.Length; key++)
+        {
+            if (oldKeys[key].RawExpression is not null && newKeys[key].RawExpression is not null && oldRendered[key] is { } oldText && newRendered[key] is { } newText)
+            {
+                oldKeys[key] = oldKeys[key] with { NormalizedExpression = oldText };
+                newKeys[key] = newKeys[key] with { NormalizedExpression = newText };
+            }
+        }
+
+        return (oldKeys, newKeys);
     }
 
     private static bool KeyElementsEqual(IReadOnlyList<IndexKeyElementDefinition> oldElements, IReadOnlyList<IndexKeyElementDefinition> newElements)
