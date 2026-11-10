@@ -13,6 +13,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ### Commands
 
+- **`publish --apply-secrets` refuses a name no user mapping uses:** a misspelt name sent nothing and the run reported success, leaving the old secret in
+  place. It now stops before anything runs (a plan warns), naming the variables the project's user mappings do use.
 - **`publish --execute` says what uses an object it refuses to change:** when a change cannot be made while something uses the object (a base type a
   column uses, a foreign table a view reads moved to another server, a collation in use), the refusal now gives the reason and names what uses it, which
   only a `--dry-run`'s `-- TODO` comment did before.

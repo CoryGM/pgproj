@@ -54,7 +54,7 @@ public static class PublishCommand
         var applySecretsOption = new Option<string[]>("--apply-secrets")
         {
             HelpName = "names",
-            Description = "Send the secrets of user mappings that already exist again, for a password that changed in PGPROJ_VAR_<name>: every variable the project's user mappings name, or only the variables listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is created. Each is an ALTER USER MAPPING ... OPTIONS (SET password :'name') in the script, which only --execute fills in.",
+            Description = "Send the secrets of user mappings that already exist again, for a password that changed in PGPROJ_VAR_<name>: every variable the project's user mappings name, or only the variables listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is created. Each is an ALTER USER MAPPING ... OPTIONS (SET password :'name') in the script, which only --execute fills in. A name no user mapping's options use is refused before anything runs.",
             Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = true,
         };

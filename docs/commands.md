@@ -302,6 +302,7 @@ Options:
 - `--apply-secrets [names]` - send the secrets of user mappings that already exist again, for a password that changed in `PGPROJ_VAR_<name>`: every variable the
   project's user mappings name, or only those listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is
   created. Each is an `ALTER USER MAPPING ... OPTIONS (SET password :'name')` in the script, filled in only by `--execute` ([foreign data](notes/foreign-data.md)).
+  A name no user mapping's options use (a typo) is refused before anything runs, naming the variables the mappings do use.
 - `--allow-lock-limit` - let `--execute` run a script estimated to need more locks than the server's lock table holds
   (`max_locks_per_transaction * (max_connections + max_prepared_transactions)`). Without it, `--execute` refuses such a script; from 80% of the table,
   `publish` warns.

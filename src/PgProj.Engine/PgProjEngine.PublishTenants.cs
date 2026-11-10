@@ -266,8 +266,29 @@ public sealed partial class PgProjEngine
         async Task<bool> CheckAllAsync(IReadOnlyList<PublishUnit> units, List<PublishNotice> warnings, List<PublishNotice> refusals)
             => WarnAndCheck(units, warnings, refusals)
                 && CheckVariables(units, warnings, refusals)
+                && CheckSecrets(warnings, refusals)
                 && await CheckServerAsync(units, warnings, refusals)
                 && await CheckSuperuserAsync(units, warnings, refusals);
+
+        // --apply-secrets names no user mapping uses (G-347); the mappings are the shared part's.
+        bool CheckSecrets(List<PublishNotice> warnings, List<PublishNotice> refusals)
+        {
+            var unknown = commentsOnly ? [] : PublishTexts.UnknownSecrets(request.ApplySecrets, sharedModel);
+            if (unknown.Count == 0)
+            {
+                return true;
+            }
+
+            var notice = new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeUnknownSecrets(unknown, PublishTexts.SecretVariables(sharedModel), executing), []);
+            if (!executing)
+            {
+                Warn(warnings, progress, notice);
+                return true;
+            }
+
+            refusals.Add(notice);
+            return false;
+        }
 
         // The scripts' variables over every part (G-336): a kept script keeps them; --execute needs a value for each, or nothing runs.
         bool CheckVariables(IReadOnlyList<PublishUnit> units, List<PublishNotice> warnings, List<PublishNotice> refusals)

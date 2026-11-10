@@ -1,5 +1,6 @@
 using PgProj.Core;
 using PgProj.Deploy;
+using PgProj.Semantics;
 
 namespace PgProj.Engine;
 
@@ -64,6 +65,34 @@ internal static class PublishTexts
     public static string DescribeVariablesMissing(IReadOnlyList<string> missing)
         => $"Publish failed: the script uses {Names(missing)}, which {(missing.Count == 1 ? "has" : "have")} no value, so nothing was run. "
             + $"Set {string.Join(", ", missing.Select(static name => VariablePrefix + name))} in the environment.";
+
+    /// <summary>
+    /// The names <c>--apply-secrets</c> lists that no user mapping's options use (G-347), in the order given; none when it lists no names (every variable) or is
+    /// not given. A name that matches nothing would send nothing, and the run used to report success.
+    /// </summary>
+    public static IReadOnlyList<string> UnknownSecrets(IReadOnlyList<string>? applySecrets, DatabaseModel model)
+    {
+        if (applySecrets is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        var known = SecretVariables(model).ToHashSet(StringComparer.Ordinal);
+        return [.. applySecrets.Where(name => !known.Contains(name)).Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The variables the project's user mappings' options use, which <c>--apply-secrets</c> can send (G-347).</summary>
+    public static IReadOnlyList<string> SecretVariables(DatabaseModel model)
+        => [.. model.UserMappings.Values.SelectMany(static mapping => mapping.Options).Select(static option => option.Variable).OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+    /// <summary>What <c>publish</c> says of <c>--apply-secrets</c> names no user mapping uses (G-347): with <c>--execute</c> it refuses before anything runs.</summary>
+    public static string DescribeUnknownSecrets(IReadOnlyList<string> unknown, IReadOnlyList<string> known, bool executing)
+    {
+        var lead = executing ? "Publish failed: " : "Warning: ";
+        var outcome = executing ? "so nothing was run" : "and publish --execute refuses it";
+        var usable = known.Count == 0 ? "The project's user mappings use no variable." : $"The project's user mappings use {Names(known)}.";
+        return $"{lead}--apply-secrets names {Names(unknown)}, which no user mapping's options use, {outcome}. {usable}";
+    }
 
     private static string Names(IReadOnlyList<string> names) => string.Join(", ", names.Select(static name => $":'{name}'"));
 

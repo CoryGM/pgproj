@@ -24,7 +24,8 @@ project's SQL is an error.
 - **A secret is sent when its mapping is created**, and not after: a later `publish` needs no value for a mapping that exists. `--execute` fills it in; a
   printed or written script keeps `:'name'`, so it runs with `psql -v name=... -f`.
 - **To send a changed secret again**, run `publish --execute --apply-secrets` (every variable the mappings name) or `--apply-secrets warehouse_password` (only
-  those listed). Each is an `ALTER USER MAPPING ... OPTIONS (SET password :'name')`.
+  those listed). Each is an `ALTER USER MAPPING ... OPTIONS (SET password :'name')`. A name no mapping uses is refused before anything runs, so a misspelt
+  one cannot leave the old secret in place unnoticed.
 - **A password written as a literal** is deployed and never compared, and `build` warns that it belongs in a variable: anyone who can read the project can read it.
 - A password is never read from a database, and never shown by `diff` or in a message.
 

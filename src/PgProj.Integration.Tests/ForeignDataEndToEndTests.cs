@@ -73,8 +73,15 @@ public sealed class ForeignDataEndToEndTests
             Assert.AreEqual("user=shop_user,password=first-secret", await OptionsAsync(connectionString, role), "The password was not sent again.");
             await AssertDiffIsEmptyAsync(projectFile, connectionString);
 
-            // --apply-secrets sends the current value to the mapping that exists.
+            // A name no mapping uses (a typo) is refused before anything runs (G-347), and the mapping keeps its password.
             Environment.SetEnvironmentVariable($"PGPROJ_VAR_{password}", "second-secret");
+            var misspelt = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", "--apply-secrets", password + "x");
+            Assert.AreNotEqual(0, misspelt.ExitCode, misspelt.Output);
+            StringAssert.Contains(misspelt.Output, $"--apply-secrets names :'{password}x', which no user mapping's options use, so nothing was run.");
+            StringAssert.Contains(misspelt.Output, $":'{password}'");
+            Assert.AreEqual("user=shop_user,password=first-secret", await OptionsAsync(connectionString, role));
+
+            // --apply-secrets sends the current value to the mapping that exists.
             var applied = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", "--apply-secrets", password);
             Assert.AreEqual(0, applied.ExitCode, applied.Output);
             Assert.AreEqual("user=shop_user,password=second-secret", await OptionsAsync(connectionString, role));

@@ -315,6 +315,13 @@ public sealed partial class PgProjEngine
             Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesKept(variablesUsed), [], ForKeptScript: true));
         }
 
+        // --apply-secrets names no user mapping uses (G-347): a typo would send nothing and the run report success.
+        var unknownSecrets = commentsOnly ? [] : PublishTexts.UnknownSecrets(request.ApplySecrets, model);
+        if (unknownSecrets.Count > 0 && !executing)
+        {
+            Warn(warnings, progress, new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeUnknownSecrets(unknownSecrets, PublishTexts.SecretVariables(model), executing: false), []));
+        }
+
         if (executing)
         {
             await RefuseAsync();
@@ -409,6 +416,11 @@ public sealed partial class PgProjEngine
             if (variablesMissing.Length > 0)
             {
                 refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeVariablesMissing(variablesMissing), []));
+            }
+
+            if (unknownSecrets.Count > 0)
+            {
+                refusals.Add(new PublishNotice(PublishNoticeKind.Variables, PublishTexts.DescribeUnknownSecrets(unknownSecrets, PublishTexts.SecretVariables(model), executing: true), []));
             }
 
             if (refusals.Count > 0)
