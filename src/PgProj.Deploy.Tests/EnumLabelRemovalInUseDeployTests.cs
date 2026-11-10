@@ -101,6 +101,35 @@ public sealed class EnumLabelRemovalInUseDeployTests
     }
 
     [TestMethod]
+    [DataRow("((cur = 'ok'::public.mood))")]
+    [DataRow("((cur = 'ok'))")]
+    [DataRow("((cur::text))")]
+    public void AnIndexWithAnExpressionOnTheColumnIsDroppedBeforeTheSwapAndCreatedAfter(string expression)
+    {
+        // G-345: only an index's predicate counted, so PostgreSQL was left to rebuild an expression index during the swap, which fails on an expression
+        // that compares the column with the old type (42883: operator does not exist: mood = mood_pgproj_old).
+        var table = $" CREATE TABLE public.m (id int, cur public.mood); CREATE INDEX m_cur_x ON public.m {expression};";
+        var batch = Generate(Build($"CREATE TYPE public.mood AS ENUM ('sad', 'ok', 'happy');{table}"), Build($"CREATE TYPE public.mood AS ENUM ('happy', 'ok', 'sad');{table}"));
+
+        var sql = batch.Operations.Select(static operation => operation.GenerateSql()).ToList();
+        var dropIndex = sql.FindIndex(static text => text.Contains("DROP INDEX", StringComparison.Ordinal) && text.Contains("m_cur_x", StringComparison.Ordinal));
+        var rename = sql.FindIndex(static text => text.Contains("RENAME TO \"mood_pgproj_old\"", StringComparison.Ordinal));
+        var swap = sql.FindIndex(static text => text.Contains("DROP TYPE \"public\".\"mood_pgproj_old\"", StringComparison.Ordinal));
+        var createIndex = sql.FindIndex(static text => text.Contains("CREATE INDEX", StringComparison.Ordinal) && text.Contains("m_cur_x", StringComparison.Ordinal));
+        Assert.IsTrue(dropIndex >= 0 && rename > dropIndex && swap > rename && createIndex > swap, string.Join(Environment.NewLine, sql));
+        Assert.IsEmpty(batch.GetDestructiveOperations(), "A reorder, and an index dropped only to be created again.");
+    }
+
+    [TestMethod]
+    public void AnIndexWithAnExpressionOnAnotherColumnIsLeftAlone()
+    {
+        const string Table = " CREATE TABLE public.m (id int, cur public.mood); CREATE INDEX m_id_x ON public.m ((id + 1));";
+        var batch = Generate(Build($"CREATE TYPE public.mood AS ENUM ('sad', 'ok', 'happy');{Table}"), Build($"CREATE TYPE public.mood AS ENUM ('happy', 'ok', 'sad');{Table}"));
+
+        Assert.IsFalse(batch.Operations.Select(static operation => operation.GenerateSql()).Any(static text => text.Contains("m_id_x", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     [DataRow("CREATE DOMAIN public.cheer AS public.mood;", "public.cheer")]
     [DataRow("CREATE TYPE public.pair AS (a public.mood, b int);", "public.pair")]
     [DataRow("CREATE FUNCTION public.f(x public.mood) RETURNS int LANGUAGE sql RETURN 1;", "public.f")]

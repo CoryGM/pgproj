@@ -149,8 +149,10 @@ public sealed partial class ScriptGenerator
                     when string.Equals(type.Trim(), "CHECK", StringComparison.OrdinalIgnoreCase) && Uses(swap, check.SchemaName, check.TableName, check.ReferencedColumns):
                     yield return check;
                     break;
+                // An expression key counts as a predicate does (G-345): NormalizedExpressions holds only the predicate's, so an index on ((c = 'r')) was
+                // left for PostgreSQL to rebuild, which it cannot, since its expression compares the column with the old type.
                 case IndexDefinition index
-                    when (index.RawPredicateExpression is not null || index.NormalizedExpressions.Count > 0)
+                    when (index.RawPredicateExpression is not null || index.NormalizedExpressions.Count > 0 || index.KeyElements.Any(static key => key.RawExpression is not null))
                         && Uses(swap, index.SchemaName, index.TableName, index.ReferencedColumns):
                     yield return index;
                     break;

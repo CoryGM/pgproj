@@ -100,6 +100,29 @@ public sealed class EnumLabelRemovalEndToEndTests
     }
 
     [TestMethod]
+    public async Task AnIndexWithAnExpressionOnTheColumnIsRebuiltWithTheType()
+    {
+        // G-345: PostgreSQL was left to rebuild the expression index during the swap and refused (42883: operator does not exist: mood = mood_pgproj_old).
+        const string Index = "\nCREATE INDEX m_cur_ok ON public.m ((cur = 'ok'::public.mood));\n";
+        await WithProjectAsync("g345", async (connectionString, projectDirectory, projectFile) =>
+        {
+            WriteSchema(projectDirectory, Sql + Index);
+            var indexed = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+            Assert.AreEqual(0, indexed.ExitCode, indexed.Output);
+            await ExecuteAsync(connectionString, "INSERT INTO public.m VALUES (1, 'ok', NULL), (2, 'sad', NULL);");
+            WriteSchema(projectDirectory, Edit(Sql, "('sad', 'ok', 'happy')", "('happy', 'ok', 'sad')") + Index);
+
+            var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+
+            Assert.AreEqual(0, published.ExitCode, published.Output);
+            Assert.AreEqual("happy,ok,sad", await ScalarTextAsync(connectionString, Labels));
+            Assert.AreEqual("(cur = 'ok'::mood)", await ScalarTextAsync(connectionString, "SELECT pg_get_indexdef('public.m_cur_ok'::regclass, 1, true)"));
+            Assert.AreEqual("0", await ScalarTextAsync(connectionString, OldTypeLeft));
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+        });
+    }
+
+    [TestMethod]
     public async Task ALabelMarkedRenamedIsRenamedInPlace()
     {
         await WithProjectAsync("g191ren", async (connectionString, projectDirectory, projectFile) =>
