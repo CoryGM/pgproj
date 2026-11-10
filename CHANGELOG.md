@@ -46,6 +46,16 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   **If a database revoked `PUBLIC`'s `USAGE` on a type and the project does not say so, `diff` now reports it, and `publish` gives it back**: add the
   `REVOKE` to the project (`init` writes it), or set `excludeGrants`. `publish` warns before anything runs when it gives `PUBLIC` a privilege on
   something the database already has ([Privileges on types and domains](docs/notes/type-privileges.md)).
+- **A function or procedure `publish` drops and creates keeps `PUBLIC`'s `EXECUTE` revoked:** before, a routine recreated to change its return type or
+  arguments came back executable by every role after its `EXECUTE` had been revoked from `PUBLIC` (a `SECURITY DEFINER` routine included), and `diff`
+  reported no change. `REVOKE EXECUTE` or `ALL ON FUNCTION|PROCEDURE ... FROM PUBLIC` (the form `pg_dump` writes) is now read, deployed, compared, put back
+  on a recreated routine, and written by `init` in the routine's file; taking it away from a routine that exists needs `--allow-destructive`.
+  `ALTER DEFAULT PRIVILEGES [FOR ROLE r] REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` (or `USAGE ON TYPES`), without `IN SCHEMA`, is read and deployed too, and
+  a routine or type the project does not revoke on its own is then allowed with or without the default. **If a database revoked `PUBLIC`'s `EXECUTE` on a
+  routine and the project does not say so, `diff` now reports it, and `publish` gives it back**: add the `REVOKE` to the project (the warning lists it,
+  and `init` writes it), or set `excludeGrants`. The warning before anything runs now spells out each privilege given to `PUBLIC`, what every role can then
+  do, which routines are `SECURITY DEFINER`, and the statement that keeps it revoked ([Privileges on functions and
+  procedures](docs/notes/routine-privileges.md)).
 - **An object created under default privileges converges:** PostgreSQL gives a new object what `ALTER DEFAULT PRIVILEGES` names, and pgproj used to
   report that as a grant to revoke, so the publish after the one that created a table in a database with such a rule planned a `REVOKE`. What one of the
   project's rules may give an object is now allowed and not required (a rule is not retroactive, so an older object without it is not changed either), and

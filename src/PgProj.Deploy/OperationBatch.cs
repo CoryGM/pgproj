@@ -103,28 +103,33 @@ public sealed record class OperationBatch
             .Select(static create => create.NodeId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // The types this script creates that the database did not have: neither dropped first nor renamed out of the way (G-191, G-119) (G-337).
-        var replacedTypeIds = Operations
-            .Where(static operation => operation is DropOperation { NodeKind: ChangeNodeKind.Type } or EnumSwapRenameOperation)
+        // The types and routines this script creates that the database did not have, as a revoked default names them: neither dropped first, nor renamed out of
+        // the way (G-191, G-119), nor replaced in place (G-337, G-338).
+        var replacedIds = Operations
+            .Where(static operation => operation is DropOperation { NodeKind: ChangeNodeKind.Type or ChangeNodeKind.Function or ChangeNodeKind.Procedure } or EnumSwapRenameOperation)
             .Select(static operation => operation.NodeId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var newTypeIds = Operations
+        var newObjectKeys = Operations
             .OfType<CreateOperation>()
-            .Where(create => create.Node is TypeDefinition && !replacedTypeIds.Contains(create.NodeId))
-            .Select(static create => create.NodeId)
+            .Where(create => !create.IsReplacedInPlace && !replacedIds.Contains(create.NodeId))
+            .Select(static create => create.Node switch
+            {
+                TypeDefinition => $"type:{create.NodeId}",
+                FunctionDefinition function => $"function:{DatabaseModel.CreateKey(function.SchemaName, GrantExpansion.RoutineObjectName(function))}",
+                ProcedureDefinition procedure => $"procedure:{DatabaseModel.CreateKey(procedure.SchemaName, GrantExpansion.RoutineObjectName(procedure))}",
+                _ => null,
+            })
+            .OfType<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         return Operations
-            .Select(operation => ClassifyDestructive(operation, recreatedNodeIds, newTypeIds))
+            .Select(operation => ClassifyDestructive(operation, recreatedNodeIds, newObjectKeys))
             .Where(static classified => classified is not null)
             .Select(static classified => classified!)
             .ToArray();
     }
 
-    /// <summary>The key of the type a revoked default (G-337) is on, as its node is keyed.</summary>
-    private static string TypeKey(GrantDefinition revoked) => DatabaseModel.CreateKey(revoked.SchemaName, revoked.ObjectName ?? revoked.Name);
-
-    private static DestructiveOperation? ClassifyDestructive(SqlOperation operation, IReadOnlySet<string> recreatedNodeIds, IReadOnlySet<string> newTypeIds)
+    private static DestructiveOperation? ClassifyDestructive(SqlOperation operation, IReadOnlySet<string> recreatedNodeIds, IReadOnlySet<string> newObjectKeys)
         => operation switch
         {
             DropOperation { Node: TableDefinition } drop
@@ -165,13 +170,14 @@ public sealed record class OperationBatch
                 => new DestructiveOperation { Operation = drop, Reasons = [$"operator dropped; every expression that uses {definition.Name} stops working"] },
             DropOperation { Node: EventTriggerDefinition eventTrigger } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [$"event trigger dropped; it no longer runs on {eventTrigger.EventName ?? "its event"}"] },
-            // Undoing a revoked default gives PUBLIC its USAGE back: nothing is taken away (G-337).
+            // Undoing a revoked default gives PUBLIC its privilege back: nothing is taken away (G-337, G-338); publish warns that it widens access instead.
             DropOperation { Node: GrantDefinition { RevokesDefault: true } }
                 => null,
             DropOperation { Node: GrantDefinition grant } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [DescribeGrantRevocation(grant)] },
-            // Taking PUBLIC's default away from a type that exists is a revoke (G-337); on a type created in this script, or given back to one recreated, it is not.
-            CreateOperation { Node: GrantDefinition { RevokesDefault: true } revoked, IsRestored: false } create when !newTypeIds.Contains(TypeKey(revoked))
+            // Taking PUBLIC's default away from a type or routine that exists is a revoke (G-337, G-338); on one created in this script, or given back to one
+            // recreated, it is not. A rule for new types or functions (ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC) changes nothing that exists.
+            CreateOperation { Node: GrantDefinition { RevokesDefault: true, ObjectName: not null } revoked, IsRestored: false } create when !newObjectKeys.Contains(revoked.ObjectKey ?? string.Empty)
                 => new DestructiveOperation { Operation = create, Reasons = [$"grant revoked: {GrantSqlBuilder.Grant(revoked).TrimEnd(';')}"] },
             // A changed owner takes the old owner's privileges away and puts them on the new one, which is an access-loss event for whoever relied on them (G-146);
             // an owner set on a new object (a create) is not.

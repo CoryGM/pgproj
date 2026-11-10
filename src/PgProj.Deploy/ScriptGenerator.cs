@@ -449,7 +449,10 @@ public sealed partial class ScriptGenerator
 
             foreach (var grant in graph.GetDependents(create.NodeId).Select(static node => node.SemanticNode).OfType<GrantDefinition>())
             {
-                if (changedGrantIds.Contains(grant.Key) || !graph.IsTargetNode(grant.Key) || !regranted.Add(grant.Key))
+                // A revoked default only the database has, that the diff leaves alone because a rule of the project allows it (G-338), is put back too: a recreated
+                // object must not get PUBLIC's privilege back without a word, whichever role's rule it was created under.
+                var keptRevoke = grant.RevokesDefault && !graph.IsTargetNode(grant.Key);
+                if (changedGrantIds.Contains(grant.Key) || (!graph.IsTargetNode(grant.Key) && !keptRevoke) || !regranted.Add(grant.Key))
                 {
                     continue;
                 }
@@ -703,6 +706,7 @@ public sealed partial class ScriptGenerator
                 NodeKind = modified.NodeKind,
                 Node = modified.NewNode,
                 PreviousComment = GetComment(modified.OldNode),
+                IsReplacedInPlace = true,
             });
 
             return;

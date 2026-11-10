@@ -41,6 +41,9 @@ public sealed record class CreateOperation : SqlOperation
     /// </summary>
     public bool IsRestored { get; init; }
 
+    /// <summary>True for a routine changed with <c>CREATE OR REPLACE</c>, in place (G-338): it is not new, and it keeps its privileges.</summary>
+    public bool IsReplacedInPlace { get; init; }
+
     public override string GenerateSql()
         => Node switch
         {

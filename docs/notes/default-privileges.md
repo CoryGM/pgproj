@@ -18,6 +18,27 @@ or `FUNCTIONS`, PostgreSQL stores the kind's whole list, and that entry for `PUB
 that writes `ALTER DEFAULT PRIVILEGES GRANT USAGE ON TYPES TO PUBLIC` asks for nothing more than the default, so neither is a difference. A rule granting to
 `PUBLIC` in one schema, or on tables, sequences, or schemas, is a real rule and is compared.
 
+## Revoking PUBLIC's default for new objects
+
+A rule can also take `PUBLIC`'s built-in privilege away from what is created after it:
+
+```sql
+ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES REVOKE USAGE ON TYPES FROM PUBLIC;
+```
+
+pgproj reads it in a project and from the database, deploys it as written, and removes it with the `GRANT ... TO PUBLIC` that undoes it, with a warning
+that every function or type created from then on is open to every role. Neither way is destructive: a rule changes nothing that exists. `publish` writes it
+before the objects it covers, so a routine or type created in the same publish is created without the default.
+
+A routine or type the project does not revoke on its own ([routine privileges](routine-privileges.md), [type privileges](type-privileges.md)) is then
+allowed either way, the same as what a granting rule gives: one created under the rule has no `PUBLIC` privilege, one created before it has the default, and
+neither is a difference. One the project does revoke on its own is still revoked. A routine or type `publish` drops and creates again keeps what the database
+had, whichever role's rule it was created under.
+
+Only a rule without `IN SCHEMA` does this. PostgreSQL makes a rule in one schema only add to the rule for every schema, so `ALTER DEFAULT PRIVILEGES IN
+SCHEMA app REVOKE ... FROM PUBLIC` changes nothing; pgproj warns that it has no effect and ignores it.
+
 ## What a rule gives an object
 
 PostgreSQL applies a rule only when an object is created: it never changes an object that already exists, and an object created before the rule keeps the

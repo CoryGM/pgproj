@@ -113,7 +113,7 @@ public sealed class TypePrivilegeEndToEndTests
             StringAssert.Contains(diff.Output, "Removed: 1", diff.Output);
             var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
             Assert.AreEqual(0, published.ExitCode, published.Output);
-            StringAssert.Contains(published.Output, "gives PUBLIC (every role) privileges on objects the database already has");
+            StringAssert.Contains(published.Output, "WARNING: this publish gives PUBLIC privileges it does not have now. PUBLIC is every role");
             StringAssert.Contains(published.Output, "GRANT ALL PRIVILEGES ON TYPE \"public\".\"mood\" TO PUBLIC;");
             Assert.AreEqual("true", await ScalarTextAsync(connectionString, "SELECT has_type_privilege('public', 'public.mood', 'USAGE')::text"));
             await AssertDiffIsEmptyAsync(projectFile, connectionString);

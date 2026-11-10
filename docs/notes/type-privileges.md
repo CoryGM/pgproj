@@ -13,13 +13,14 @@ GRANT USAGE ON DOMAIN app.positive TO app_writer WITH GRANT OPTION;
 
 `USAGE` is the only privilege a type has, so `GRANT ALL` is the same grant. A domain may be named `ON TYPE` too, which is how `pg_dump` writes it.
 
-## PostgreSQL's default, and the one `REVOKE` pgproj reads
+## PostgreSQL's default, and the `REVOKE` pgproj reads
 
 PostgreSQL gives `USAGE` on every new type and domain to `PUBLIC`, every role. A project that says nothing about a type's privileges wants that default, as
 running its SQL on an empty database would give, and `diff` compares the type that way.
 
-To take the default away, write `REVOKE USAGE ON TYPE t FROM PUBLIC` (or `REVOKE ALL`, or `ON DOMAIN`), the form `pg_dump` writes. It is the one `REVOKE`
-pgproj reads; every other one is a warning and ignored, because a project states what it grants and pgproj revokes the rest. A `REVOKE` that also names a
+To take the default away, write `REVOKE USAGE ON TYPE t FROM PUBLIC` (or `REVOKE ALL`, or `ON DOMAIN`), the form `pg_dump` writes. With the same `REVOKE`
+on a function or procedure ([routine privileges](routine-privileges.md)) and in `ALTER DEFAULT PRIVILEGES` ([default
+privileges](default-privileges.md#revoking-publics-default-for-new-objects)), it is the one `REVOKE` pgproj reads; every other one is a warning and ignored, because a project states what it grants and pgproj revokes the rest. A `REVOKE` that also names a
 role reads only its `PUBLIC` part, and says so.
 
 What `USAGE` on a type controls is creating things that use it (a column, a function's argument or result, a cast, a domain over it), not reading or writing
@@ -35,12 +36,21 @@ its values: a role without it can still select a column of the type.
   no consent, but it widens access, so `publish` names it:
 
   ```text
-  Warning: this publish gives PUBLIC (every role) privileges on objects the database already has:
-    GRANT ALL PRIVILEGES ON TYPE "app"."status" TO PUBLIC;
-  A type or domain gets PUBLIC's USAGE back when the project does not revoke it; to keep it revoked, write REVOKE USAGE ON TYPE ... FROM PUBLIC in the project.
+  WARNING: this publish gives PUBLIC privileges it does not have now. PUBLIC is every role, including roles created later:
+  after this publish, every role has the privileges listed below. Read each one before you run it.
+
+  PostgreSQL's default is given back, because the database has it revoked and the project does not revoke it:
+    - type app.status: every role can use it.
+        GRANT ALL PRIVILEGES ON TYPE "app"."status" TO PUBLIC;
+  To keep them revoked, add to the project:
+        REVOKE ALL PRIVILEGES ON TYPE "app"."status" FROM PUBLIC;
+    pgproj init writes these REVOKE statements when it scaffolds a project from the database.
+
+  If any of this is not what you want, do not run this publish.
   ```
 
-  The same warning names any grant to `PUBLIC` the project adds on a table, sequence, routine, type, or schema the database already has.
+  The same warning names a routine's `EXECUTE` given back ([routine privileges](routine-privileges.md)), a rule that revokes the default for new types or
+  functions the project removes, and any grant to `PUBLIC` the project adds on a table, sequence, routine, type, or schema the database already has.
 - **A type `publish` drops and creates again**, or rebuilds under the columns that use it (an [enum](enum-types.md) that loses or reorders a label, a
   [composite type](composite-types.md) that retypes a field), gets its `REVOKE` and grants back. With `excludeGrants`, it gets back the privileges the
   database had.

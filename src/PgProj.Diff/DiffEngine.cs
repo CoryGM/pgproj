@@ -806,7 +806,7 @@ public sealed class DiffEngine
     {
         var oldGrants = OrderedGrants(oldModel);
         var newGrants = OrderedGrants(newModel);
-        DiffRevokedDefaults(newModel, oldGrants, newGrants, added, removed);
+        DiffRevokedDefaults(oldModel, newModel, oldGrants, newGrants, added, removed);
         oldGrants = oldGrants.Where(static grant => !grant.RevokesDefault).ToArray();
         newGrants = newGrants.Where(static grant => !grant.RevokesDefault).ToArray();
 
@@ -866,23 +866,31 @@ public sealed class DiffEngine
     }
 
     /// <summary>
-    /// <c>REVOKE ... FROM PUBLIC</c> on a type or domain (G-337, <see cref="GrantDefinition.RevokesDefault"/>), compared by its key: one only the project has is
-    /// added (the default is taken away), and one only the database has is removed (<c>PUBLIC</c> is given its <c>USAGE</c> back), unless the project drops the
-    /// type, which takes its privileges with it.
+    /// <c>REVOKE ... FROM PUBLIC</c> of PostgreSQL's default on a type or domain (G-337), a function or procedure (G-338), or in a rule for new types or functions
+    /// (G-338, part (i)), each a <see cref="GrantDefinition.RevokesDefault"/> compared by what it names: one only the project has is added (the default is taken
+    /// away), and one only the database has is removed (<c>PUBLIC</c> is given its privilege back). Not removed: one on an object the project drops, which takes its
+    /// privileges with it, and one on a type or routine the project's own rule would create without the default (allowed, not required; G-339's option (c)). A
+    /// rule <c>FOR ROLE</c> the role that deploys is the same as one without <c>FOR ROLE</c>.
     /// </summary>
     private static void DiffRevokedDefaults(
+        DatabaseModel oldModel,
         DatabaseModel newModel,
         IReadOnlyList<GrantDefinition> oldGrants,
         IReadOnlyList<GrantDefinition> newGrants,
         ICollection<AddedChange> added,
         ICollection<RemovedChange> removed)
     {
-        var oldKeys = oldGrants.Where(static grant => grant.RevokesDefault).Select(static grant => grant.Key).ToHashSet(StringComparer.Ordinal);
-        var newKeys = newGrants.Where(static grant => grant.RevokesDefault).Select(static grant => grant.Key).ToHashSet(StringComparer.Ordinal);
+        var connectedRole = oldModel.ConnectedRole;
+        (string ObjectKey, string? ForRole) Identity(GrantDefinition grant)
+            => (grant.ObjectKey ?? string.Empty, grant.ForRole is not null && string.Equals(grant.ForRole, connectedRole, StringComparison.OrdinalIgnoreCase) ? null : grant.ForRole);
 
-        foreach (var oldGrant in oldGrants.Where(grant => grant.RevokesDefault && !newKeys.Contains(grant.Key)))
+        var oldIdentities = oldGrants.Where(static grant => grant.RevokesDefault).Select(Identity).ToHashSet();
+        var newIdentities = newGrants.Where(static grant => grant.RevokesDefault).Select(Identity).ToHashSet();
+
+        foreach (var oldGrant in oldGrants.Where(grant => grant.RevokesDefault && !newIdentities.Contains(Identity(grant))))
         {
-            if (oldGrant.ObjectName is { } typeName && !newModel.Types.ContainsKey(DatabaseModel.CreateKey(oldGrant.SchemaName, typeName)))
+            var objectKey = oldGrant.ObjectKey ?? string.Empty;
+            if ((oldGrant.ObjectName is not null && !ProjectHasObject(newModel, oldGrant)) || GrantExpansion.RevokesDefaultByRule(newModel, objectKey))
             {
                 continue;
             }
@@ -890,10 +898,26 @@ public sealed class DiffEngine
             removed.Add(new RemovedChange { NodeId = oldGrant.Key, NodeKind = ChangeRecord.MapKind(oldGrant), Node = oldGrant });
         }
 
-        foreach (var newGrant in newGrants.Where(grant => grant.RevokesDefault && !oldKeys.Contains(grant.Key)))
+        foreach (var newGrant in newGrants.Where(grant => grant.RevokesDefault && !oldIdentities.Contains(Identity(grant))))
         {
             added.Add(new AddedChange { NodeId = newGrant.Key, NodeKind = ChangeRecord.MapKind(newGrant), Node = newGrant });
         }
+    }
+
+    /// <summary>Whether <paramref name="model"/> has the type, function, or procedure a revoked default names.</summary>
+    private static bool ProjectHasObject(DatabaseModel model, GrantDefinition revoked)
+    {
+        var objectKey = revoked.ObjectKey ?? string.Empty;
+        bool InSchema(string? schemaName) => string.Equals(schemaName, revoked.SchemaName, StringComparison.Ordinal);
+        return objectKey switch
+        {
+            _ when objectKey.StartsWith("type:", StringComparison.Ordinal) => model.Types.ContainsKey(DatabaseModel.CreateKey(revoked.SchemaName, revoked.ObjectName!)),
+            _ when objectKey.StartsWith("function:", StringComparison.Ordinal)
+                => model.Functions.Values.Any(function => InSchema(function.SchemaName) && GrantExpansion.RoutineObjectName(function) == revoked.ObjectName),
+            _ when objectKey.StartsWith("procedure:", StringComparison.Ordinal)
+                => model.Procedures.Values.Any(procedure => InSchema(procedure.SchemaName) && GrantExpansion.RoutineObjectName(procedure) == revoked.ObjectName),
+            _ => true,
+        };
     }
 
     private static GrantDefinition[] OrderedGrants(DatabaseModel model)

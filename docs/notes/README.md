@@ -51,7 +51,8 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Tablespaces](tablespaces.md) — the `TABLESPACE` clause, and the check before `publish --execute`
 - [Owners](owners.md) — `OWNER TO`, and why an owner the project does not state is not compared
 - [Privileges on types and domains](type-privileges.md) — `GRANT USAGE ON TYPE`, and `REVOKE ... FROM PUBLIC` for PostgreSQL's default
-- [Default privileges](default-privileges.md) — `ALTER DEFAULT PRIVILEGES`: what a rule gives a new object, and why an older one is left alone
+- [Privileges on functions and procedures](routine-privileges.md) — `REVOKE ... FROM PUBLIC` for PostgreSQL's `EXECUTE`, kept when a routine is recreated
+- [Default privileges](default-privileges.md) — `ALTER DEFAULT PRIVILEGES`: what a rule gives or revokes for a new object, and why an older one is left alone
 
 ## Tables, columns, and types
 

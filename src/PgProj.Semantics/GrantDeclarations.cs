@@ -68,22 +68,33 @@ internal static class GrantDeclarations
 
     private static readonly string[] ObjectKinds = ["schema", "table", "sequence", "function", "procedure", "type", "domain"];
 
-    /// <summary>The object kinds whose objects PostgreSQL gives <c>PUBLIC</c> a privilege by default that a project can revoke (G-337).</summary>
-    private static readonly string[] RevocableDefaultKinds = ["type", "domain"];
-
     /// <summary>
-    /// <c>REVOKE USAGE|ALL ON TYPE|DOMAIN t FROM PUBLIC</c> (G-337, option (B), approved by the user on 2026-11-09), the form <c>pg_dump</c> writes for a type
-    /// without PostgreSQL's default: one <see cref="GrantDefinition.RevokesDefault"/> definition per type. Null for every other <c>REVOKE</c>, which stays a warning. A
-    /// grantee other than <c>PUBLIC</c> in the same statement is not read (a project states what it grants, and pgproj revokes the rest), and says so.
+    /// <c>REVOKE ... FROM PUBLIC</c> of a privilege PostgreSQL gives <c>PUBLIC</c> by default, read as "without the default": one <see
+    /// cref="GrantDefinition.RevokesDefault"/> definition per object or rule. Null for every other <c>REVOKE</c>, which stays a warning.
+    /// <list type="bullet">
+    /// <item><c>REVOKE USAGE|ALL ON TYPE|DOMAIN t FROM PUBLIC</c> (G-337, option (B), approved by the user on 2026-11-09), the form <c>pg_dump</c> writes.</item>
+    /// <item><c>REVOKE EXECUTE|ALL ON FUNCTION|PROCEDURE f(...) FROM PUBLIC</c> (G-338, the same option for routines, approved on 2026-11-10).</item>
+    /// <item><c>ALTER DEFAULT PRIVILEGES [FOR ROLE r] REVOKE EXECUTE|ALL ON FUNCTIONS|ROUTINES FROM PUBLIC</c>, and <c>... USAGE|ALL ON TYPES ...</c> (G-338,
+    /// part (i)): a rule that new routines (or types) are created without the default. With <c>IN SCHEMA</c> PostgreSQL makes no rule of it (a per-schema rule only
+    /// adds to the global one), so it is a warning that says so.</item>
+    /// </list>
+    /// A grantee other than <c>PUBLIC</c> in the same statement is not read (a project states what it grants, and pgproj revokes the rest), and says so.
     /// </summary>
     private static List<GrantDefinition>? DeclareRevokedDefaults(GrantNode node, ICollection<SemanticDiagnostic> diagnostics, SemanticLocation? location)
     {
-        var revokesTypeUsage = node.Form == GrantForm.Object
-            && RevocableDefaultKinds.Contains(node.ObjectKind)
+        var defaultPrivilege = node.ObjectKind switch
+        {
+            "type" or "domain" => "USAGE",
+            "function" or "procedure" => "EXECUTE",
+            _ => null,
+        };
+        var revokesDefault = defaultPrivilege is not null
+            && node.Form is GrantForm.Object or GrantForm.DefaultPrivileges
+            && (node.Form == GrantForm.Object || node.ObjectKind is "type" or "function")
             && !node.WithGrantOption
-            && node.Privileges.All(static privilege => privilege.Columns.Count == 0
-                && privilege.Name is "USAGE" or "ALL" or AllPrivileges);
-        if (!revokesTypeUsage || !node.Grantees.Any(IsPublic))
+            && node.Privileges.All(privilege => privilege.Columns.Count == 0
+                && (privilege.Name == defaultPrivilege || privilege.Name is "ALL" or AllPrivileges));
+        if (!revokesDefault || !node.Grantees.Any(IsPublic))
         {
             return null;
         }
@@ -92,22 +103,41 @@ internal static class GrantDeclarations
         if (others.Length > 0)
         {
             diagnostics.Add(SemanticDiagnostics.Warning(
-                $"REVOKE ... FROM {string.Join(", ", others)} is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest. Only REVOKE ... FROM PUBLIC is read on a type or domain.",
+                $"REVOKE ... FROM {string.Join(", ", others)} is not modeled and is ignored: a project states the privileges it wants with GRANT, and pgproj revokes the rest. Only REVOKE ... FROM PUBLIC is read on a type, domain, function, or procedure, and in ALTER DEFAULT PRIVILEGES on types and functions.",
                 location,
                 nameof(DeclarationPass)));
         }
 
+        if (node.Form == GrantForm.DefaultPrivileges)
+        {
+            if (node.Schemas.Count > 0)
+            {
+                diagnostics.Add(SemanticDiagnostics.Warning(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA ... REVOKE ... FROM PUBLIC has no effect and is ignored: a rule in one schema only adds to the rule for every schema, so PostgreSQL keeps PUBLIC's default. Write it without IN SCHEMA.",
+                    location,
+                    nameof(DeclarationPass)));
+                return [];
+            }
+
+            IReadOnlyList<string?> roles = node.Roles.Count == 0 ? [null] : node.Roles.Cast<string?>().ToArray();
+            return roles
+                .Select(role => CreateDefinition(null, $"default {node.ObjectKind}s", null, "PUBLIC", [AllPrivileges], columns: [], withGrantOption: false, forRole: role, revokesDefault: true))
+                .ToList();
+        }
+
         return node.Targets
-            .Select(target => CreateDefinition(
-                target.SchemaName,
-                $"type:{DatabaseModel.CreateKey(target.SchemaName, target.Name)}",
-                target.Name,
-                "PUBLIC",
-                [AllPrivileges],
-                columns: [],
-                withGrantOption: false,
-                forRole: null,
-                revokesDefault: true))
+            .Select(target =>
+            {
+                // A domain is a type: ON TYPE names one too, and both are one revoke (G-337).
+                if (defaultPrivilege == "USAGE")
+                {
+                    return CreateDefinition(target.SchemaName, $"type:{DatabaseModel.CreateKey(target.SchemaName, target.Name)}", target.Name, "PUBLIC", [AllPrivileges], columns: [], withGrantOption: false, forRole: null, revokesDefault: true);
+                }
+
+                var routineName = GrantExpansion.RoutineObjectName(target.Name, target.ArgumentTypes ?? []);
+                return CreateDefinition(target.SchemaName, $"{node.ObjectKind}:{DatabaseModel.CreateKey(target.SchemaName, routineName)}", routineName, "PUBLIC", [AllPrivileges], columns: [], withGrantOption: false, forRole: null, revokesDefault: true)
+                    with { ObjectArgumentTypes = target.ArgumentTypes ?? [] };
+            })
             .ToList();
     }
 

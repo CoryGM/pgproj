@@ -80,13 +80,13 @@ public sealed class TypeGrantDeclarationTests
         Assert.IsTrue(model.Grants.Values.Single().RevokesDefault);
         var warning = model.Diagnostics.Single(static diagnostic => diagnostic.Severity == SemanticDiagnosticSeverity.Warning);
         StringAssert.Contains(warning.Message, "REVOKE ... FROM r is not modeled");
-        StringAssert.Contains(warning.Message, "Only REVOKE ... FROM PUBLIC is read on a type or domain.");
+        StringAssert.Contains(warning.Message, "Only REVOKE ... FROM PUBLIC is read on a type, domain, function, or procedure");
     }
 
     [TestMethod]
     [DataRow("REVOKE USAGE ON TYPE app.mood FROM r;")]
     [DataRow("REVOKE GRANT OPTION FOR USAGE ON TYPE app.mood FROM PUBLIC;")]
-    [DataRow("REVOKE EXECUTE ON FUNCTION app.f() FROM PUBLIC;")] // routines are G-338
+    [DataRow("REVOKE USAGE ON ALL SEQUENCES IN SCHEMA app FROM PUBLIC;")]
     public void EveryOtherRevokeIsStillAWarning(string sql)
     {
         var model = Build(Types + sql);

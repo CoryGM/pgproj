@@ -111,6 +111,23 @@ public static class GrantExpansion
     }
 
     /// <summary>
+    /// Whether <paramref name="project"/> has a rule that creates objects like the one <paramref name="objectKey"/> names (<c>type:</c>, <c>function:</c>, or
+    /// <c>procedure:</c>) without <c>PUBLIC</c>'s default (<c>ALTER DEFAULT PRIVILEGES [FOR ROLE r] REVOKE ... ON TYPES|FUNCTIONS FROM PUBLIC</c>; G-338, part (i),
+    /// tolerant like G-339's option (c)): then an object without the default is allowed, not required, since PostgreSQL applies the rule only to what is created after
+    /// it. A rule of any <c>FOR ROLE</c> counts.
+    /// </summary>
+    public static bool RevokesDefaultByRule(DatabaseModel project, string objectKey)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(objectKey);
+
+        var kind = objectKey.StartsWith("type:", StringComparison.Ordinal) ? "default types"
+            : objectKey.StartsWith("function:", StringComparison.Ordinal) || objectKey.StartsWith("procedure:", StringComparison.Ordinal) ? "default functions"
+            : null;
+        return kind is not null && project.Grants.Values.Any(grant => grant.RevokesDefault && grant.ObjectKey == kind);
+    }
+
+    /// <summary>
     /// What the default-privilege rules of <paramref name="project"/> may give an object (G-339, option (c), the user's decision of 2026-11-09): a privilege a rule
     /// would give an object of its kind, globally or in the object's schema, is allowed and not required, since PostgreSQL applies a rule only to what is created
     /// after it and pgproj cannot know which existing objects were. A rule of any <c>FOR ROLE</c> counts. <c>TABLES</c> covers tables and views (whose grants are
@@ -121,7 +138,7 @@ public static class GrantExpansion
         ArgumentNullException.ThrowIfNull(project);
 
         var given = new HashSet<(string Kind, string? Schema, string Grantee, string Privilege, bool WithGrantOption)>();
-        foreach (var rule in project.Grants.Values.Where(static grant => grant.ObjectKey?.StartsWith("default ", StringComparison.Ordinal) == true && !string.IsNullOrWhiteSpace(grant.Grantee)))
+        foreach (var rule in project.Grants.Values.Where(static grant => grant.ObjectKey?.StartsWith("default ", StringComparison.Ordinal) == true && !grant.RevokesDefault && !string.IsNullOrWhiteSpace(grant.Grantee)))
         {
             var kind = DefaultPrivilegeKind(rule.ObjectKey!);
             var fullSet = kind switch

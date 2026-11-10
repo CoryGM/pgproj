@@ -22,6 +22,8 @@ public sealed partial class LiveDatabaseModelLoader
         grants.AddRange(await ReadColumnGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadDefaultPrivilegesGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadTypeGrantsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadRoutineRevokedDefaultsAsync(connection, scopeSchemas, cancellationToken));
+        grants.AddRange(await ReadDefaultPrivilegeRevokedDefaultsAsync(connection, cancellationToken));
         grants.AddRange(await ReadRoleMembershipsAsync(connection, cancellationToken));
         return grants;
     }
@@ -323,6 +325,85 @@ public sealed partial class LiveDatabaseModelLoader
             {
                 grants.Add(new LiveGrantSnapshot(schemaName, objectKey, grantee, $"GRANT USAGE ON {target} TO {RenderGrantee(grantee)}{(grantOption ? WithGrantOption : string.Empty)}"));
             }
+        }
+
+        return grants;
+    }
+
+    /// <summary>
+    /// Functions and procedures without <c>PUBLIC</c>'s <c>EXECUTE</c> (G-338), as <c>REVOKE ALL ON FUNCTION|PROCEDURE ... FROM PUBLIC</c>, the form <c>pg_dump</c>
+    /// writes. A routine whose list is null has PostgreSQL's default; once a grant or revoke has written the list out, one without <c>PUBLIC</c> was revoked. The
+    /// other entries are read with the other objects' privileges. The same routines are read as there: not an extension's, a range type's constructors, or a base
+    /// type's support functions; aggregates are not read. The key names the routine as <c>init</c> files it (by its identity arguments), and the statement by its
+    /// argument types.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadRoutineRevokedDefaultsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
+    {
+        const string routineRevokeSql =
+            """
+            select ns.nspname as schema_name,
+                   proc.proname as routine_name,
+                   proc.prokind = 'p' as is_procedure,
+                   pg_catalog.oidvectortypes(proc.proargtypes) as argument_types,
+                   pg_catalog.pg_get_function_identity_arguments(proc.oid) as identity_arguments
+            from pg_catalog.pg_proc proc
+            inner join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+            where proc.prokind in ('f', 'w', 'p')
+              and proc.proacl is not null
+              and not exists (select 1 from pg_catalog.aclexplode(proc.proacl) acl where acl.grantee = 0 and acl.privilege_type = 'EXECUTE')
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
+              and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
+              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas))
+            order by schema_name, routine_name, argument_types;
+            """;
+
+        var grants = new List<LiveGrantSnapshot>();
+        await using var command = CreateCommand(routineRevokeSql, connection, scopeSchemas);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var schemaName = reader.GetString(0);
+            var name = reader.GetString(1);
+            var keyword = reader.GetBoolean(2) ? "PROCEDURE" : "FUNCTION";
+            grants.Add(new LiveGrantSnapshot(
+                schemaName,
+                $"{keyword.ToLowerInvariant()}:{schemaName}.{name}({reader.GetString(4)})",
+                "PUBLIC",
+                $"REVOKE ALL ON {keyword} {RenderIdentifier(schemaName)}.{RenderIdentifier(name)}({reader.GetString(3)}) FROM PUBLIC"));
+        }
+
+        return grants;
+    }
+
+    /// <summary>
+    /// Rules that new types or functions are created without <c>PUBLIC</c>'s default (G-338, part (i)): a list with no <c>IN SCHEMA</c> on types or functions
+    /// without <c>PUBLIC</c>'s entry, which PostgreSQL stores once a rule exists and keeps the default in unless it was revoked (G-340), read as <c>ALTER DEFAULT
+    /// PRIVILEGES [FOR ROLE r] REVOKE ALL ON TYPES|FUNCTIONS FROM PUBLIC</c>. A list in one schema only adds to the global one, so it says nothing of the default.
+    /// </summary>
+    private static async Task<IReadOnlyList<LiveGrantSnapshot>> ReadDefaultPrivilegeRevokedDefaultsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string revokedDefaultSql =
+            """
+            select case defacl.defaclobjtype when 'T' then 'types' else 'functions' end as object_kind,
+                   case when pg_catalog.pg_get_userbyid(defacl.defaclrole) = current_user then null else pg_catalog.pg_get_userbyid(defacl.defaclrole) end as for_role
+            from pg_catalog.pg_default_acl defacl
+            where defacl.defaclnamespace = 0
+              and defacl.defaclobjtype in ('T', 'f')
+              and not exists (select 1 from pg_catalog.aclexplode(defacl.defaclacl) acl where acl.grantee = 0)
+            order by object_kind, for_role nulls first;
+            """;
+
+        var grants = new List<LiveGrantSnapshot>();
+        await using var command = new NpgsqlCommand(revokedDefaultSql, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var objectKind = reader.GetString(0);
+            var roleClause = reader.IsDBNull(1) ? string.Empty : $" FOR ROLE {RenderIdentifier(reader.GetString(1))}";
+            grants.Add(new LiveGrantSnapshot(string.Empty, $"default {objectKind}", "PUBLIC", $"ALTER DEFAULT PRIVILEGES{roleClause} REVOKE ALL ON {objectKind.ToUpperInvariant()} FROM PUBLIC"));
         }
 
         return grants;
