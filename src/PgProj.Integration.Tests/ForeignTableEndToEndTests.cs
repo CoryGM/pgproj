@@ -129,7 +129,8 @@ public sealed class ForeignTableEndToEndTests
             WriteSchema(projectDirectory, Servers + table.Replace("SERVER remote", "SERVER archive", StringComparison.Ordinal));
             var refused = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", "--allow-destructive");
             Assert.AreNotEqual(0, refused.ExitCode, refused.Output);
-            StringAssert.Contains(refused.Output, "[Table] public.ft");
+            StringAssert.Contains(refused.Output, "[Table] public.ft: The foreign table public.ft moves to another server");
+            StringAssert.Contains(refused.Output, "public.v", "--execute says what uses it (G-346), not only the dry run.");
             var preview = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--dry-run");
             StringAssert.Contains(preview.Output, "-- TODO: The foreign table public.ft moves to another server");
             StringAssert.Contains(preview.Output, "public.v");

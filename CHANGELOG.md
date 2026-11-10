@@ -13,6 +13,9 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ### Commands
 
+- **`publish --execute` says what uses an object it refuses to change:** when a change cannot be made while something uses the object (a base type a
+  column uses, a foreign table a view reads moved to another server, a collation in use), the refusal now gives the reason and names what uses it, which
+  only a `--dry-run`'s `-- TODO` comment did before.
 - **An index whose expression compares a column with an untyped literal converges:** `CREATE INDEX ... ((status = 'open'))` on an enum column was
   reported changed after every `publish` and dropped and created again, since PostgreSQL stores the literal with its cast (`'open'::status`). An
   index's expression keys are now compared as PostgreSQL renders them, as a partial index's predicate already was; what is deployed is still what you wrote.

@@ -43,11 +43,15 @@ internal static class PublishItems
             item.Statement.Reason,
             item.Part))];
 
-    /// <summary>The operations that emit a placeholder; a blocked change (an object in use that cannot be changed, G-148) is <see cref="PublishNoticeKind.BlockedChange"/>.</summary>
+    /// <summary>
+    /// The operations that emit a placeholder; a blocked change (an object in use that cannot be changed, G-148) is <see cref="PublishNoticeKind.BlockedChange"/>,
+    /// and its line says why and what uses the object (G-346), as a destructive item gives its reasons: it was only in the dry run's <c>-- TODO</c>.
+    /// </summary>
     public static PublishItem[] Unsupported(IEnumerable<(string? Part, SqlOperation Operation)> operations)
         => [.. operations.Select(static item => new PublishItem(
             item.Operation is BlockedOperation ? PublishNoticeKind.BlockedChange : PublishNoticeKind.Unsupported,
-            (item.Part is null ? string.Empty : item.Part + ": ") + $"[{item.Operation.NodeKind}] {DatabaseModel.DisplayKey(item.Operation.NodeId)}",
+            (item.Part is null ? string.Empty : item.Part + ": ") + $"[{item.Operation.NodeKind}] {DatabaseModel.DisplayKey(item.Operation.NodeId)}"
+                + (item.Operation is BlockedOperation { Message.Length: > 0 } reason ? $": {reason.Message}" : string.Empty),
             item.Operation.NodeKind,
             item.Operation.NodeId,
             item.Operation is BlockedOperation blocked ? blocked.Message : null,
