@@ -11,6 +11,8 @@
 - a dropped materialized view (its computed data is lost until it is refreshed), including one dropped to be rebuilt around a change to what it uses;
 - a dropped extension (every object it owns is dropped with it);
 - a dropped field of a composite type (`ALTER TYPE ... DROP ATTRIBUTE`; the values it holds in stored rows are lost);
+- a field of a composite type that columns use retyped to a type not known to hold every value (`varchar(10)` to `varchar(5)`; the type is rebuilt under
+  them, and a value that does not fit stops the publish, [composite types](composite-types.md));
 - a label removed from an enum type that columns use (the type is rebuilt under them; a row that holds the label stops the publish, [enum types](enum-types.md));
 - a dropped cast, operator, aggregate, rule, publication, or event trigger that the script does not create again (one that is changed is dropped and created again, which loses nothing);
 - a revoked grant or role membership (a genuine `REVOKE`, not a narrower re-grant), unless `excludeGrants`/`excludeRoleMemberships` leaves it out of the model;

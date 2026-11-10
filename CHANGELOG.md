@@ -29,6 +29,11 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   partial and expression indexes on them, and the owner the project states for the type, put back. A removed label needs `--allow-destructive`, and
   a row that still holds it stops the publish in words; a reorder does not need consent. A label marked `-- @renamed-label: old -> new` above the `CREATE TYPE` is renamed in place
   ([Enum types](docs/notes/enum-types.md)).
+- **A composite type that retypes a field while table columns use it is rebuilt under them**, where `publish` used to write an `ALTER ATTRIBUTE ... TYPE`
+  that PostgreSQL refused: the old type is renamed out of the way, the new one created, and each column moved to it (arrays too) with its value built
+  field by field, by name, and read through text, so a value that no longer fits stops the publish in words instead of being cut; the columns' defaults,
+  and the views, checks, and partial and expression indexes on them, are put back. A narrowed field needs `--allow-destructive`; a widened one does not.
+  Adding and dropping fields are still done in place ([Composite types](docs/notes/composite-types.md)).
 - **`build` reports transaction control in the deploy scripts:** a `COMMIT`, `ROLLBACK`, or other statement that ends the transaction, and a statement
   PostgreSQL refuses inside one (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, ...), are errors at their line, so `publish` does not run;
   a `BEGIN` is a warning. Before, a `COMMIT` in a pre-deploy script committed what ran before it, and `publish --execute` then failed with

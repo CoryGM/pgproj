@@ -123,6 +123,9 @@ public sealed record class OperationBatch
                     Operation = swap,
                     Reasons = [$"enum label{(swap.RemovedLabels.Count == 1 ? string.Empty : "s")} {string.Join(", ", swap.RemovedLabels.Select(static label => $"'{label}'"))} removed while columns use the type; a row holding one stops the publish"],
                 },
+            // A composite type rebuilt under its columns (G-119, decision 2) that drops a field, or narrows one: a widening keeps every value.
+            CompositeSwapOperation { DestructiveReasons.Count: > 0 } swap
+                => new DestructiveOperation { Operation = swap, Reasons = swap.DestructiveReasons },
             DropOperation { Node: ViewDefinition { IsMaterialized: true } } drop
                 => new DestructiveOperation { Operation = drop, Reasons = ["materialized view dropped; its computed data is lost until it is refreshed"] },
             DropOperation { Node: TypeDefinition type } drop when SqlOperation.IsExtension(type)

@@ -264,6 +264,19 @@ the type keeps, in a pre-deploy script (`UPDATE app.visits SET mood = 'sad' WHER
 label was renamed, not removed, say so above the `CREATE TYPE` (`-- @renamed-label: ok -> fine`), and it is renamed in place
 ([Enum types](notes/enum-types.md)).
 
+### holds a value the composite type ... cannot take after the change
+
+```text
+Publish failed: 22001: the column app.homes.a holds a value the composite type app.addr cannot take after the change, so the type was not rebuilt: value too long for type character varying(3)
+  Hint: Change those rows first (a pre-deploy script can), or keep the field's type.
+  The statement that failed: DO $pgproj$ BEGIN ALTER TABLE "app"."homes" ALTER COLUMN "a" TYPE "app"."addr" USING CASE WHEN "a"::text IS NULL THEN ...
+  Nothing was applied: the script was rolled back.
+```
+
+The project narrowed a field of a composite type that a column uses (here `zip varchar(5)` to `varchar(3)`), and a row holds a value the new field
+cannot take, so the type could not be rebuilt under its column. Change those rows so the value fits, in a pre-deploy script
+(`UPDATE app.homes SET a.zip = left((a).zip, 3);`) or by hand, then publish again; or keep the field's type ([Composite types](notes/composite-types.md)).
+
 ### The server refused a statement
 
 ```text

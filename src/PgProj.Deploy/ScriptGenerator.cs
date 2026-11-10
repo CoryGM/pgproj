@@ -35,17 +35,30 @@ public sealed partial class ScriptGenerator
         var changedCollationsInUse = FindChangedObjectsInUse(modifiedChanges, graph);
 
         // An enum type that loses or reorders a label under table columns is rebuilt under them instead (G-191); what else uses one keeps it refused.
+        // typeSwaps holds the composite types rebuilt the same way too (G-119), below.
         var swapRefusals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var enumSwaps = FindEnumSwaps(changedCollationsInUse, modifiedChanges, graph, swapRefusals);
+        var typeSwaps = FindEnumSwaps(changedCollationsInUse, modifiedChanges, graph, swapRefusals);
         foreach (var (key, users) in changedCollationsInUse)
         {
-            if (!enumSwaps.ContainsKey(key))
+            if (!typeSwaps.ContainsKey(key))
             {
                 operations.Add(BlockedChangedObject(modifiedChanges.First(change => string.Equals(change.NodeId, key, StringComparison.Ordinal)), users, swapRefusals.GetValueOrDefault(key)));
             }
         }
 
-        modifiedChanges = modifiedChanges.Where(change => !changedCollationsInUse.ContainsKey(change.NodeId) || enumSwaps.ContainsKey(change.NodeId)).ToArray();
+        // A composite type that retypes a field under table columns is rebuilt under them the same way (G-119); one that cannot be is refused, naming why.
+        var compositeRefusals = new List<SqlOperation>();
+        var compositeSwaps = FindCompositeSwaps(modifiedChanges, graph, compositeRefusals);
+        operations.AddRange(compositeRefusals);
+        var refusedComposites = compositeRefusals.Select(static operation => operation.NodeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, swap) in compositeSwaps)
+        {
+            typeSwaps[key] = swap;
+        }
+
+        modifiedChanges = modifiedChanges
+            .Where(change => (!changedCollationsInUse.ContainsKey(change.NodeId) || typeSwaps.ContainsKey(change.NodeId)) && !refusedComposites.Contains(change.NodeId))
+            .ToArray();
 
         var addedByNodeId = addedChanges.ToDictionary(change => change.NodeId, PgProj.Parser.SqlIdentifiers.NameComparer);
         var modifiedByNodeId = modifiedChanges.ToDictionary(change => change.NodeId, PgProj.Parser.SqlIdentifiers.NameComparer);
@@ -64,7 +77,7 @@ public sealed partial class ScriptGenerator
             .Where(change => change.NewNode is FunctionDefinition or ProcedureDefinition or OperatorDefinition or AggregateDefinition && IsDropAndRecreate(change, replaceInPlace))
             .Select(static change => change.NodeId)
             .ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer);
-        var rebuilds = FindDependentRebuilds(modifiedChanges, droppedRoutines, graph, enumSwaps.Values.SelectMany(static swap => swap.ColumnsByTable));
+        var rebuilds = FindDependentRebuilds(modifiedChanges, droppedRoutines, graph, typeSwaps.Values.SelectMany(static swap => swap.ColumnsByTable));
         var forcedRebuilds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var detaches = new List<SqlOperation>();
         var reattaches = new List<SqlOperation>();
@@ -145,7 +158,7 @@ public sealed partial class ScriptGenerator
 
         // A check or an index with a predicate or expression on a swapped column compares it with the old type's labels, so it is dropped before the swap
         // and created again after (G-191); a plain index or key moves with the column.
-        foreach (var swap in enumSwaps.Values)
+        foreach (var swap in typeSwaps.Values)
         {
             foreach (var dependent in SwapDependents(swap, graph))
             {
@@ -154,7 +167,7 @@ public sealed partial class ScriptGenerator
                     continue;
                 }
 
-                indexReasons[dependent.Key] = $"it uses a column of the enum type {swap.Change.NodeId}, which is rebuilt under it, and PostgreSQL cannot carry it through the change";
+                indexReasons[dependent.Key] = $"it uses a column of the {(swap.IsEnum ? "enum" : "composite")} type {swap.Change.NodeId}, which is rebuilt under it, and PostgreSQL cannot carry it through the change";
                 if (!modifiedByNodeId.ContainsKey(dependent.Key))
                 {
                     modifiedByNodeId[dependent.Key] = new ModifiedChange
@@ -176,7 +189,7 @@ public sealed partial class ScriptGenerator
             orderedNodeIds = graph.TopologicalSort().Select(node => node.NodeId).ToArray();
         }
 
-        bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
+        bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || typeSwaps.ContainsKey(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
         string? DropReason(string nodeId)
             => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is dropped here and recreated below: {RebuildReason(nodeId)}." : null;
         string? CreateReason(string nodeId)
@@ -201,7 +214,7 @@ public sealed partial class ScriptGenerator
                 });
             }
 
-            if (modifiedByNodeId.TryGetValue(nodeId, out var swapped) && enumSwaps.TryGetValue(nodeId, out var swap))
+            if (modifiedByNodeId.TryGetValue(nodeId, out var swapped) && typeSwaps.TryGetValue(nodeId, out var swap))
             {
                 // The type the database has makes way under another name, so the new one is created under its own, with no rename after it (G-191).
                 operations.Add(new EnumSwapRenameOperation
@@ -210,7 +223,7 @@ public sealed partial class ScriptGenerator
                     NodeKind = swapped.NodeKind,
                     SchemaName = swap.NewType.SchemaName,
                     TypeName = swap.NewType.Name,
-                    Reason = $"{swapped.NodeId} loses or reorders a label while columns use it: it is kept as {EnumSwapRenameOperation.OldName(swap.NewType.Name)}, created again below, its columns moved to it, and then dropped.",
+                    Reason = $"{swapped.NodeId} {(swap.IsEnum ? "loses or reorders a label" : "retypes a field")} while columns use it: it is kept as {EnumSwapRenameOperation.OldName(swap.NewType.Name)}, created again below, its columns moved to it, and then dropped.",
                 });
             }
             else if (modifiedByNodeId.TryGetValue(nodeId, out var modified) && Recreates(modified))
@@ -266,7 +279,11 @@ public sealed partial class ScriptGenerator
                             ? ReaddCheck(create, check)
                             : [create]);
                     operations.AddRange(CommentAfterCreate(modified.NewNode, modified.NodeId, modified.NodeKind, graph, replaced: true));
-                    if (enumSwaps.TryGetValue(modified.NodeId, out var swapAfter))
+                    if (typeSwaps.TryGetValue(modified.NodeId, out var swapAfter) && !swapAfter.IsEnum)
+                    {
+                        operations.Add(CompositeSwap(swapAfter, modified));
+                    }
+                    else if (swapAfter is not null)
                     {
                         operations.Add(new EnumSwapOperation
                         {

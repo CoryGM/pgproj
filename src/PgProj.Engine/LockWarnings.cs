@@ -57,6 +57,14 @@ internal static partial class LockWarnings
                     }
 
                     break;
+                // A composite type rebuilt under its columns (G-119), the same.
+                case CompositeSwapOperation swap:
+                    foreach (var column in swap.Columns)
+                    {
+                        warnings.Add(new LockWarning(Key(column.SchemaName, column.TableName), $"ALTER COLUMN {column.ColumnName} TYPE (composite {swap.NodeId} rebuilt)", "rewrites the table and its indexes under an ACCESS EXCLUSIVE lock"));
+                    }
+
+                    break;
             }
         }
 

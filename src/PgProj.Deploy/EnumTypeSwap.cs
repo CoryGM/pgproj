@@ -4,13 +4,13 @@ using PgProj.Semantics;
 
 namespace PgProj.Deploy;
 
-/// <summary>A column moved to the rebuilt enum type by <see cref="EnumSwapOperation"/> (G-191).</summary>
+/// <summary>A column moved to a rebuilt type: an enum's by <see cref="EnumSwapOperation"/> (G-191), a composite's by <see cref="CompositeSwapOperation"/> (G-119).</summary>
 /// <param name="DefaultExpression">The project's default for the column, set again after the move; null when it has none.</param>
 /// <param name="HasLiveDefault">True when the database's column has a default, which is dropped before the move (PostgreSQL cannot cast it automatically).</param>
 public sealed record EnumSwapColumn(string? SchemaName, string TableName, string ColumnName, bool IsArray, string? DefaultExpression, bool HasLiveDefault);
 
 /// <summary>
-/// The first half of an enum type's swap (G-191, the user's design of 2026-11-09): the type the database has is renamed out of the way, to
+/// The first half of a type's swap, an enum's (G-191, the user's design of 2026-11-09) or a composite's (G-119): the type the database has is renamed out of the way, to
 /// <see cref="OldName"/>, so the new type is created under its own name, with no rename after it. It stands where the type's drop would be, after what uses the columns is
 /// dropped.
 /// </summary>
@@ -27,18 +27,21 @@ public sealed record class EnumSwapRenameOperation : SqlOperation
     /// The name the old type is kept under while its columns move: <c>&lt;type&gt;_pgproj_old</c> (decision 5 as revised on 2026-11-09), the type's name
     /// shortened, a character at a time, so it fits PostgreSQL's 63 bytes.
     /// </summary>
-    public static string OldName(string typeName)
+    public static string OldName(string typeName) => SwapName(typeName, "_pgproj_old");
+
+    /// <summary>The type's name with <paramref name="suffix"/>, the name shortened, a character at a time, so the whole fits PostgreSQL's 63 bytes.</summary>
+    public static string SwapName(string typeName, string suffix)
     {
         ArgumentNullException.ThrowIfNull(typeName);
+        ArgumentNullException.ThrowIfNull(suffix);
 
-        const string Suffix = "_pgproj_old";
         var name = typeName;
-        while (name.Length > 0 && Encoding.UTF8.GetByteCount(name) + Suffix.Length > 63)
+        while (name.Length > 0 && Encoding.UTF8.GetByteCount(name) + Encoding.UTF8.GetByteCount(suffix) > 63)
         {
             name = name[..^1];
         }
 
-        return name + Suffix;
+        return name + suffix;
     }
 }
 

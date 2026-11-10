@@ -131,8 +131,8 @@ public sealed record class AlterOperation : SqlOperation
     /// longer has is dropped, one whose type changed is retyped, and a new one is added, in that order. PostgreSQL appends an
     /// added field, so one written in the middle of the type ends up last in the database; field order is not compared (G-110),
     /// so the type still converges. <c>ALTER ATTRIBUTE ... TYPE</c> is refused by PostgreSQL while any table column uses the
-    /// type (the publish then rolls back); dropping and recreating the type fails in that case too, and in every other case in
-    /// which anything uses it. <c>CASCADE</c> is written when a typed table is of the type (G-136), and only then: it carries the field to that table, which the table's own change does not repeat.
+    /// type, so a retype under columns is not made here: the type is rebuilt under them (G-119, <see cref="CompositeSwapOperation"/>), or refused by
+    /// name. Dropping and recreating the type would fail whenever anything uses it. <c>CASCADE</c> is written when a typed table is of the type (G-136), and only then: it carries the field to that table, which the table's own change does not repeat.
     /// </summary>
     private static List<string> GenerateAlterCompositeFields(string qualifiedName, TypeDefinition oldType, TypeDefinition newType)
     {
