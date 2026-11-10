@@ -1,7 +1,7 @@
 # Real-world QA sweep
 
 This runs pgproj over the schemas of real projects instead of PostgreSQL's regression SQL (see [`../README.md`](../README.md) for that harness). It was first run on
-2026-10-13 and again on 2026-10-15. The sweep finds defects that small, hand-written test schemas do not: a statement nested too deeply, a rule on an
+2026-10-13 and again on 2026-10-15 and before the 0.2.2 release. The sweep finds defects that small, hand-written test schemas do not: a statement nested too deeply, a rule on an
 extension's view, a pgvector operator class, a schema too big for the server's lock table.
 
 ## The schemas
@@ -24,18 +24,22 @@ downloads and loaded in place of them, because the originals do not load into th
 
 ## Running it
 
-You need Docker, `curl`, Python 3, Git Bash or another POSIX shell, and a built CLI (`dotnet build src/PgProj.Cli`; every command runs through the engine, `PgProj.Engine`, so that is where a defect found here usually
-is). Use ports 55490 to 55498, never 55432.
+You need Docker, the .NET SDK, `curl`, Python 3, and Git Bash or another POSIX shell. Every command runs through the engine, `PgProj.Engine`, so that is where a defect found here usually is.
+
+No server publishes a host port. The servers and pgproj share a Docker network of their own (`rwqa`, or `RW_NETWORK`): `runall.sh` publishes a self-contained
+`linux-x64` build of this checkout into `work/realworld/rw-tools/pgproj-linux` and runs each command in a container (`mcr.microsoft.com/dotnet/runtime-deps:10.0`)
+with `work/realworld` mounted at `/work`, so the sweep also tests the Linux build that is shipped. `psql` and `pg_dump` run in the server's container.
 
 ```sh
-tools/diffqa/realworld/runall.sh        # fetches, starts the containers, runs everything, removes the containers (KEEP=1 keeps them)
+tools/diffqa/realworld/runall.sh        # fetches, builds, makes the network and servers, runs everything, removes them (KEEP=1 keeps them)
 ```
 
-Run only one at a time: every run deletes `work/realworld/rw-out`. For one schema on a server you started yourself:
+Run only one at a time: every run deletes `work/realworld/rw-out`. For one schema, after a `runall.sh` with `KEEP=1` (or with the network, a server on it, and
+the build made the same way):
 
 ```sh
 tools/diffqa/realworld/fetch.sh synapse
-tools/diffqa/realworld/rw.sh <name> <file> <container> <port> [written]
+tools/diffqa/realworld/rw.sh <name> <file> <container> [written]
 ```
 
 For each schema `rw.sh` loads the file into a database and prints one line per step:
@@ -43,7 +47,9 @@ For each schema `rw.sh` loads the file into a database and prints one line per s
 - **`source objects`:** how many tables, views, and the like the load made. If it is 0, the script loaded into some other database or failed, and the rest of the run proves
   nothing. Read it first.
 - **init path:** `init --report`, `build`, `publish --execute` into an empty database, `diff` against the source and the published database, and `pg_dump --schema-only` of both
-  compared.
+  compared twice: without owners and privileges (`-O -x`), and with them.
+- **kept script:** the script `publish --output` writes for another empty database, run with `psql -v ON_ERROR_STOP=1 -f` as a user would (it carries its own
+  `BEGIN` and `COMMIT`), then `diff` and the same two dump comparisons.
 - **written path** (with `written`): the file itself as a project, with `build`, `publish`, `diff`, and the dump compared. Some files fail here for reasons of their own: a
   `SET search_path` between schemas, which pgproj ignores, an extension the image lacks, or an installer step outside the file.
 
@@ -52,7 +58,8 @@ For each schema `rw.sh` loads the file into a database and prints one line per s
 
 ## Reading the result
 
-A clean init path is: build 0 errors, `diff` 0/0/0 both ways, 0 dump differences, second `publish` nothing, `diff --exit-code` 0. A GitLab dump differs in partition index names
+A clean init path is: build 0 errors, `diff` 0/0/0 both ways, 0 dump differences (with and without owners and privileges), second `publish` nothing,
+`diff --exit-code` 0; a clean kept script: one `BEGIN` and one `COMMIT`, `psql` exit 0, `diff` 0/0/0, 0 dump differences. A GitLab dump differs in partition index names
 (the G-237 limit), and Synapse's upgrade differs from a fresh v72 in one column's position; both are known. Anything else is a candidate gap: confirm it, then open it as a gap
 issue. Output is in `work/realworld/rw-out/<name>/` (`init.log`, `build.log`, `publish.log`, `init.diff`, `written.diff`, the scaffolded project, and the docs).
 Not yet run: the Synapse upgrade with millions of rows in `events`.
