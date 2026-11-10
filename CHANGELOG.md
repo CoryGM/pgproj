@@ -13,7 +13,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ### Commands
 
-- **With `--source-connection`, the direction is the first line:** `diff` and `publish` printed the source's diagnostics (`No diagnostics.`) before the`n  `Source A -> Target B` line; it now comes first, as the documents say.
+- **With `--source-connection`, the direction is the first line:** `diff` and `publish` printed the source's diagnostics (`No diagnostics.`) before the
+  `Source A -> Target B` line; it now comes first, as the documents say.
 - **`publish --apply-secrets` refuses a name no user mapping uses:** a misspelt name sent nothing and the run reported success, leaving the old secret in
   place. It now stops before anything runs (a plan warns), naming the variables the project's user mappings do use.
 - **`publish --execute` says what uses an object it refuses to change:** when a change cannot be made while something uses the object (a base type a
