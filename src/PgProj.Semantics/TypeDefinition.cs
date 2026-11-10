@@ -171,6 +171,15 @@ public sealed record TypeDefinition(
     /// <summary>True when a typed table (<c>CREATE TABLE t OF this_type</c>) is of this composite type (G-136): changing one of its fields is written with <c>CASCADE</c>, which carries the change to the table.</summary>
     public bool HasTypedTables { get; init; }
 
+    /// <summary>A base type's options (G-267, <c>TypeKind == "base"</c>), in their comparison form; null for any other kind.</summary>
+    public BaseTypeOptionsDefinition? BaseTypeOptions { get; init; }
+
+    /// <summary>A base type's <c>CREATE TYPE</c> as written, which is what is deployed (G-267); null for any other kind, or one made in code.</summary>
+    public string? BaseTypeWrittenText { get; init; }
+
+    /// <summary>True for a base type (G-267): <c>CREATE TYPE name (INPUT = ..., OUTPUT = ...)</c>.</summary>
+    public bool IsBaseType => string.Equals(TypeKind, "base", StringComparison.Ordinal);
+
     /// <summary>
     /// The comparison form of a domain's <c>DEFAULT</c> (null when it has none); equal for two spellings of the
     /// same default and different for a genuine change, mirroring <see cref="ColumnDefinition.GetComparableDefaultExpression"/> (G-77).

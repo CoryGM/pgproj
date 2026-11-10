@@ -85,6 +85,31 @@ public sealed class SuperuserStatementsTests
     }
 
     [TestMethod]
+    public void ABaseTypeItsShellAndASetOfItsOptionsNeedASuperuserAndItsDropDoesNot()
+    {
+        // G-267: PostgreSQL creates a base type, or its shell, and changes its options with ALTER TYPE ... SET, only for a superuser, even for the type's owner.
+        const string functions = """
+            CREATE FUNCTION public.t_in(cstring) RETURNS public.t LANGUAGE internal IMMUTABLE STRICT AS $$int4in$$;
+            CREATE FUNCTION public.t_out(public.t) RETURNS cstring LANGUAGE internal IMMUTABLE STRICT AS $$int4out$$;
+            CREATE FUNCTION public.t_recv(internal) RETURNS public.t LANGUAGE internal IMMUTABLE STRICT AS $$int4recv$$;
+
+            """;
+        const string type = "CREATE TYPE public.t (INPUT = t_in, OUTPUT = t_out, LIKE = int4);";
+
+        var created = Find(functions + type, []);
+        CollectionAssert.IsSubsetOf(
+            new[] { "only a superuser can create a base type or its shell" },
+            created.Where(static statement => statement.NodeKind == ChangeNodeKind.Type).Select(static statement => statement.Reason).Distinct().ToArray());
+
+        var altered = SuperuserStatements.Find(Generate(Build(functions + type), Build(functions + type.Replace("LIKE = int4", "LIKE = int4, RECEIVE = t_recv", StringComparison.Ordinal))), []);
+        Assert.AreEqual("only a superuser can change a base type's options (ALTER TYPE ... SET)", altered.Single().Reason);
+
+        var commentOnly = SuperuserStatements.Find(Generate(Build(functions + type), Build(functions + type + "COMMENT ON TYPE public.t IS 'x';")), []);
+        Assert.IsEmpty(commentOnly, "A comment needs no superuser.");
+        Assert.IsEmpty(SuperuserStatements.Find(Generate(Build(functions + type), Build(string.Empty)), []), "Dropping a base type needs its owner, not a superuser.");
+    }
+
+    [TestMethod]
     public void TheScriptHeaderNamesTheStatementsAndTheOption()
     {
         var header = SuperuserStatements.ScriptHeader(Find(EventTrigger, []));

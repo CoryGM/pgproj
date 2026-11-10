@@ -3,64 +3,223 @@ using static PgProj.Integration.Tests.EndToEndSupport;
 namespace PgProj.Integration.Tests;
 
 /// <summary>
-/// G-241 against a real server. Base types are not modeled (the user's decision of 2026-10-13; modeling them is G-267). <c>init</c> wrote a base type's input and output
-/// functions, whose <c>CREATE FUNCTION</c> made a shell type, so publishing the scaffold failed with <c>type ... is only a shell</c>; a project written as <c>pg_dump</c>
-/// writes one refused to build (<c>Duplicate Type definition</c>). Now <c>init</c> leaves the type and its functions out and names it, the live read leaves the functions out,
-/// and a project's base type is reported and ignored with its functions; with the type created beforehand (as a superuser would), what uses it publishes and converges.
+/// G-267 against a real server: base types are modeled (the user's design of 2026-11-09), replacing G-241's tests, in which a base type and its functions were left out of a
+/// project and the database had to have the type first. A project written as <c>pg_dump</c> writes one (a shell, the internal functions, the full definition) publishes behind
+/// <c>--allow-superuser-statements</c> and converges; an option <c>ALTER TYPE ... SET</c> covers changes in place; another change rebuilds the type and its functions, or is
+/// refused while a column uses it; a removed type is dropped with <c>CASCADE</c>, which the check before it stops when something outside the project uses the type; and
+/// <c>init</c> writes the shell, the functions, and the definition in the type's file, and the scaffold builds the same type in another database.
 /// </summary>
 [TestClass]
 public sealed class BaseTypeEndToEndTests
 {
-    /// <summary>A base type as <c>pg_dump</c> writes one: a shell, the internal functions, the full definition; then a cast and a column that use it.</summary>
+    /// <summary>A base type as <c>pg_dump</c> writes one: a shell, the internal functions, the full definition.</summary>
     private const string BaseTypeSql = """
         CREATE TYPE public.xint4;
         CREATE FUNCTION public.xint4in(cstring) RETURNS public.xint4 LANGUAGE internal IMMUTABLE STRICT AS $$int4in$$;
         CREATE FUNCTION public.xint4out(public.xint4) RETURNS cstring LANGUAGE internal IMMUTABLE STRICT AS $$int4out$$;
         CREATE TYPE public.xint4 (INTERNALLENGTH = 4, INPUT = public.xint4in, OUTPUT = public.xint4out, ALIGNMENT = int4, STORAGE = plain, PASSEDBYVALUE);
+
+        """;
+
+    private const string ReceiveSendSql = """
+        CREATE FUNCTION public.xint4recv(internal) RETURNS public.xint4 LANGUAGE internal IMMUTABLE STRICT AS $$int4recv$$;
+        CREATE FUNCTION public.xint4send(public.xint4) RETURNS bytea LANGUAGE internal IMMUTABLE STRICT AS $$int4send$$;
+
         """;
 
     private const string UsesSql = """
         CREATE CAST (integer AS public.xint4) WITHOUT FUNCTION;
         CREATE TABLE public.t (id integer PRIMARY KEY, v public.xint4);
-        CREATE FUNCTION public.plain() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$;
+
         """;
 
+    private const string Superuser = "--allow-superuser-statements";
+
     [TestMethod]
-    public async Task InitLeavesABaseTypeAndItsFunctionsOutAndTheRestConverges()
+    public async Task APgDumpBaseTypePublishesOnlyWithConsentAndConverges()
     {
-        var databaseName = await CreateDatabaseAsync("g241");
-        var secondDatabase = await CreateDatabaseAsync("g241b");
-        var scaffoldDirectory = Path.Combine(Path.GetTempPath(), "pgproj-g241-init-" + Guid.NewGuid().ToString("N"));
+        var databaseName = await CreateDatabaseAsync("g267");
+        var projectDirectory = CreateProjectDirectory("g267");
         try
         {
             var connectionString = ConnectionStringFor(databaseName);
-            await ExecuteAsync(connectionString, BaseTypeSql + UsesSql);
+            var projectFile = ProjectFile(projectDirectory);
+            WriteSchema(projectDirectory, BaseTypeSql + UsesSql);
+
+            var built = await RunAsync("build", "--project", projectFile);
+            Assert.AreEqual(0, built.ExitCode, built.Output);
+            Assert.IsFalse(built.Output.Contains("not modeled", StringComparison.Ordinal), "A base type and its shell are modeled.\n" + built.Output);
+            Assert.IsFalse(built.Output.Contains("cycle", StringComparison.OrdinalIgnoreCase), built.Output);
+
+            var refused = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+            Assert.AreNotEqual(0, refused.ExitCode, refused.Output);
+            StringAssert.Contains(refused.Output, "only a superuser can create a base type or its shell");
+            Assert.AreEqual("0", await ScalarTextAsync(connectionString, "SELECT count(*)::text FROM pg_type WHERE typname = 'xint4'"), "Nothing ran.");
+
+            var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser);
+            Assert.AreEqual(0, published.ExitCode, published.Output);
+            Assert.AreEqual("4 t i p xint4in xint4out", await ScalarTextAsync(connectionString, "SELECT concat_ws(' ', typlen, typbyval, typalign, typstorage, typinput, typoutput) FROM pg_type WHERE oid = 'public.xint4'::regtype"));
+            Assert.AreEqual("xint4", await ScalarTextAsync(connectionString, "SELECT atttypid::regtype::text FROM pg_attribute WHERE attrelid = 'public.t'::regclass AND attname = 'v'"));
+            await ExecuteAsync(connectionString, "INSERT INTO public.t VALUES (1, '42'::public.xint4);");
+            Assert.AreEqual("42", await ScalarTextAsync(connectionString, "SELECT v::text FROM public.t"));
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+
+            var again = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+            Assert.AreEqual(0, again.ExitCode, "A second publish changes nothing, so it needs no consent.\n" + again.Output);
+
+            // The same type written another way: unqualified functions, LIKE in place of the four options it copies, the defaults stated.
+            WriteSchema(projectDirectory, Edit(BaseTypeSql, "CREATE TYPE public.xint4 (INTERNALLENGTH = 4, INPUT = public.xint4in, OUTPUT = public.xint4out, ALIGNMENT = int4, STORAGE = plain, PASSEDBYVALUE);",
+                "CREATE TYPE public.xint4 (INPUT = xint4in, OUTPUT = xint4out, LIKE = integer, CATEGORY = 'U', DELIMITER = ',', PREFERRED = false);") + UsesSql);
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+            TryDeleteDirectory(projectDirectory);
+        }
+    }
+
+    [TestMethod]
+    public async Task AnOptionSetChangesIsChangedInPlaceUnderAColumn()
+    {
+        var databaseName = await CreateDatabaseAsync("g267s");
+        var projectDirectory = CreateProjectDirectory("g267s");
+        try
+        {
+            var connectionString = ConnectionStringFor(databaseName);
+            var projectFile = ProjectFile(projectDirectory);
+            WriteSchema(projectDirectory, BaseTypeSql + ReceiveSendSql + UsesSql);
+            Assert.AreEqual(0, (await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser)).ExitCode);
+            await ExecuteAsync(connectionString, "INSERT INTO public.t VALUES (1, '7');");
+
+            WriteSchema(projectDirectory, Edit(BaseTypeSql, "PASSEDBYVALUE);", "PASSEDBYVALUE, RECEIVE = xint4recv, SEND = xint4send);") + ReceiveSendSql + UsesSql);
+            var dryRun = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--dry-run");
+            StringAssert.Contains(dryRun.Output, "ALTER TYPE \"public\".\"xint4\" SET (RECEIVE = xint4recv, SEND = xint4send);");
+            var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser);
+            Assert.AreEqual(0, published.ExitCode, published.Output);
+            Assert.AreEqual("xint4recv xint4send", await ScalarTextAsync(connectionString, "SELECT concat_ws(' ', typreceive, typsend) FROM pg_type WHERE oid = 'public.xint4'::regtype"));
+            Assert.AreEqual("7", await ScalarTextAsync(connectionString, "SELECT v::text FROM public.t"), "The column and its value are untouched.");
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+            TryDeleteDirectory(projectDirectory);
+        }
+    }
+
+    [TestMethod]
+    public async Task AnyOtherChangeRebuildsTheTypeAndItsFunctionsOrIsRefusedWhileAColumnUsesIt()
+    {
+        var databaseName = await CreateDatabaseAsync("g267r");
+        var projectDirectory = CreateProjectDirectory("g267r");
+        try
+        {
+            var connectionString = ConnectionStringFor(databaseName);
+            var projectFile = ProjectFile(projectDirectory);
+            WriteSchema(projectDirectory, BaseTypeSql + "COMMENT ON TYPE public.xint4 IS 'kept';\n");
+            Assert.AreEqual(0, (await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser)).ExitCode);
+
+            // Nothing uses it: dropped with its functions, and created again.
+            WriteSchema(projectDirectory, Edit(BaseTypeSql, "PASSEDBYVALUE);", "PASSEDBYVALUE, CATEGORY = 'N');") + "COMMENT ON TYPE public.xint4 IS 'kept';\n");
+            var rebuilt = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser);
+            Assert.AreEqual(0, rebuilt.ExitCode, rebuilt.Output);
+            Assert.AreEqual("N kept", await ScalarTextAsync(connectionString, "SELECT concat_ws(' ', typcategory, obj_description(oid, 'pg_type')) FROM pg_type WHERE oid = 'public.xint4'::regtype"));
+            Assert.AreEqual("2", await ScalarTextAsync(connectionString, "SELECT count(*)::text FROM pg_proc WHERE proname IN ('xint4in', 'xint4out')"));
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+
+            // A column uses it: refused, naming the table, and nothing runs.
+            WriteSchema(projectDirectory, Edit(BaseTypeSql, "PASSEDBYVALUE);", "PASSEDBYVALUE, CATEGORY = 'N');") + "COMMENT ON TYPE public.xint4 IS 'kept';\n" + UsesSql);
+            Assert.AreEqual(0, (await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser)).ExitCode);
+            WriteSchema(projectDirectory, Edit(BaseTypeSql, "PASSEDBYVALUE);", "PASSEDBYVALUE, CATEGORY = 'S');") + "COMMENT ON TYPE public.xint4 IS 'kept';\n" + UsesSql);
+            var planned = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--dry-run");
+            StringAssert.Contains(planned.Output, "The base type public.xint4 changes an option that PostgreSQL cannot change in place");
+            StringAssert.Contains(planned.Output, "public.t");
+            var refused = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser);
+            Assert.AreNotEqual(0, refused.ExitCode, refused.Output);
+            StringAssert.Contains(refused.Output, "[Type] public.xint4");
+            Assert.AreEqual("N", await ScalarTextAsync(connectionString, "SELECT typcategory::text FROM pg_type WHERE oid = 'public.xint4'::regtype"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+            TryDeleteDirectory(projectDirectory);
+        }
+    }
+
+    [TestMethod]
+    public async Task ARemovedTypeIsDroppedWithItsFunctionsUnlessSomethingElseUsesIt()
+    {
+        var databaseName = await CreateDatabaseAsync("g267d");
+        var projectDirectory = CreateProjectDirectory("g267d", ", \"schemas\": [\"public\"]");
+        try
+        {
+            var connectionString = ConnectionStringFor(databaseName);
+            var projectFile = ProjectFile(projectDirectory);
+            WriteSchema(projectDirectory, BaseTypeSql + "CREATE TABLE public.keep (id integer);\n");
+            Assert.AreEqual(0, (await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", Superuser)).ExitCode);
+
+            // A table outside the project's schemas uses the type: the check before the CASCADE stops the publish, which rolls back.
+            await ExecuteAsync(connectionString, "CREATE SCHEMA other; CREATE TABLE other.u (v public.xint4);");
+            WriteSchema(projectDirectory, "CREATE TABLE public.keep (id integer);\n");
+            var stopped = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+            Assert.AreNotEqual(0, stopped.ExitCode, stopped.Output);
+            StringAssert.Contains(stopped.Output, "base type public.xint4 cannot be dropped: DROP TYPE ... CASCADE would also drop column v of table other.u");
+            Assert.AreEqual("1", await ScalarTextAsync(connectionString, "SELECT count(*)::text FROM pg_attribute WHERE attrelid = 'other.u'::regclass AND attname = 'v'"), "The column is still there.");
+
+            await ExecuteAsync(connectionString, "DROP TABLE other.u;");
+            var dropped = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+            Assert.AreEqual(0, dropped.ExitCode, "Dropping a base type needs no superuser.\n" + dropped.Output);
+            Assert.AreEqual("0 0", await ScalarTextAsync(connectionString, "SELECT (SELECT count(*) FROM pg_type WHERE typname IN ('xint4', '_xint4')) || ' ' || (SELECT count(*) FROM pg_proc WHERE proname IN ('xint4in', 'xint4out'))"));
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+            TryDeleteDirectory(projectDirectory);
+        }
+    }
+
+    [TestMethod]
+    public async Task InitWritesTheShellTheFunctionsAndTheTypeInItsFileAndTheScaffoldConverges()
+    {
+        var databaseName = await CreateDatabaseAsync("g267i");
+        var secondDatabase = await CreateDatabaseAsync("g267j");
+        var scaffoldDirectory = Path.Combine(Path.GetTempPath(), "pgproj-g267-init-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var connectionString = ConnectionStringFor(databaseName);
+            await ExecuteAsync(connectionString, BaseTypeSql + ReceiveSendSql + """
+                ALTER TYPE public.xint4 SET (RECEIVE = xint4recv, SEND = xint4send);
+                CREATE TYPE public.xvec;
+                CREATE FUNCTION public.xvec_in(cstring) RETURNS public.xvec LANGUAGE internal IMMUTABLE STRICT AS $$float8in$$;
+                CREATE FUNCTION public.xvec_out(public.xvec) RETURNS cstring LANGUAGE internal IMMUTABLE STRICT AS $$float8out$$;
+                CREATE TYPE public.xvec (INPUT = xvec_in, OUTPUT = xvec_out, LIKE = float8, ELEMENT = float4, SUBSCRIPT = raw_array_subscript_handler, CATEGORY = 'N', DEFAULT = '0', COLLATABLE = false);
+                COMMENT ON TYPE public.xvec IS 'a vector';
+                """ + UsesSql + "CREATE FUNCTION public.plain() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$;\n");
 
             var scaffoldProject = Path.Combine(scaffoldDirectory, "pgproj.json");
-            var scaffolded = await RunAsync("init", "--project", scaffoldProject, "--source-connection", connectionString, "--report");
+            var scaffolded = await RunAsync("init", "--project", scaffoldProject, "--source-connection", connectionString);
             Assert.AreEqual(0, scaffolded.ExitCode, scaffolded.Output);
-            StringAssert.Contains(scaffolded.Output, "Left out a base type, with its input and output functions: public.xint4.");
+            Assert.IsFalse(scaffolded.Output.Contains("Left out a base type", StringComparison.Ordinal), "A base type is not left out any more.\n" + scaffolded.Output);
 
-            var sql = string.Join("\n", Directory.GetFiles(Path.Combine(scaffoldDirectory, "sql"), "*.sql", SearchOption.AllDirectories).Select(File.ReadAllText));
-            Assert.IsFalse(sql.Contains("xint4in", StringComparison.Ordinal), "The input function is left out with the type.\n" + sql);
-            Assert.IsFalse(sql.Contains("xint4out", StringComparison.Ordinal), "The output function is left out with the type.\n" + sql);
-            StringAssert.Contains(sql, "FUNCTION public.plain()");
-            StringAssert.Contains(sql, "xint4");
-
-            var report = File.ReadAllText(Directory.GetFiles(Path.Combine(scaffoldDirectory, "sql"), "init-report-*.md").Single());
-            StringAssert.Contains(report, "| `public` | Base type | `xint4` | not supported |");
-            Assert.IsFalse(report.Contains("`_xint4`", StringComparison.Ordinal), "The array type PostgreSQL made for the base type is not listed.\n" + report);
-
-            // The scaffold against the database it came from: the type's functions are not read either, so nothing is proposed for dropping.
+            var sqlDirectory = Path.Combine(scaffoldDirectory, "sql");
+            var typeFile = File.ReadAllText(Path.Combine(sqlDirectory, "Schema", "public", "Type", "xint4.sql")).Replace("\r\n", "\n", StringComparison.Ordinal);
+            var shell = typeFile.IndexOf("CREATE TYPE public.xint4;", StringComparison.Ordinal);
+            var input = typeFile.IndexOf("FUNCTION public.xint4in(cstring)", StringComparison.Ordinal);
+            var definition = typeFile.IndexOf("CREATE TYPE public.xint4 (", StringComparison.Ordinal);
+            Assert.IsTrue(shell >= 0 && shell < input && input < definition, typeFile);
+            StringAssert.Contains(typeFile, "RECEIVE = public.xint4recv");
+            Assert.IsFalse(Directory.EnumerateFiles(sqlDirectory, "xint4in.sql", SearchOption.AllDirectories).Any(), "A support function is in its type's file, not a file of its own.");
+            Assert.IsTrue(Directory.EnumerateFiles(sqlDirectory, "plain.sql", SearchOption.AllDirectories).Any());
             await AssertDiffIsEmptyAsync(scaffoldProject, connectionString);
 
-            // Into a second database, with the type created first (as a superuser would, outside pgproj): the cast and the column publish and converge.
             var secondConnection = ConnectionStringFor(secondDatabase);
-            await ExecuteAsync(secondConnection, BaseTypeSql);
-            var published = await RunAsync("publish", "--project", scaffoldProject, "--target-connection", secondConnection, "--execute");
-            Assert.AreEqual(0, published.ExitCode, "publishing the scaffold failed.\n" + published.Output);
-            Assert.AreEqual("xint4", await ScalarTextAsync(secondConnection, "SELECT atttypid::regtype::text FROM pg_attribute WHERE attrelid = 'public.t'::regclass AND attname = 'v'"));
-            Assert.AreEqual("1", await ScalarTextAsync(secondConnection, "SELECT count(*)::text FROM pg_cast WHERE casttarget = 'public.xint4'::regtype"));
+            var copied = await RunAsync("publish", "--project", scaffoldProject, "--target-connection", secondConnection, "--execute", Superuser);
+            Assert.AreEqual(0, copied.ExitCode, copied.Output);
+            Assert.AreEqual(
+                await ScalarTextAsync(connectionString, "SELECT string_agg(concat_ws(' ', typname, typlen, typbyval, typalign, typstorage, typcategory, typelem::regtype, typdefault, typinput, typreceive, typsubscript, obj_description(oid, 'pg_type')), ' | ' ORDER BY typname) FROM pg_type WHERE typname IN ('xint4', 'xvec')"),
+                await ScalarTextAsync(secondConnection, "SELECT string_agg(concat_ws(' ', typname, typlen, typbyval, typalign, typstorage, typcategory, typelem::regtype, typdefault, typinput, typreceive, typsubscript, obj_description(oid, 'pg_type')), ' | ' ORDER BY typname) FROM pg_type WHERE typname IN ('xint4', 'xvec')"));
             await AssertDiffIsEmptyAsync(scaffoldProject, secondConnection);
         }
         finally
@@ -68,38 +227,6 @@ public sealed class BaseTypeEndToEndTests
             await DropDatabaseAsync(secondDatabase);
             await DropDatabaseAsync(databaseName);
             TryDeleteDirectory(scaffoldDirectory);
-        }
-    }
-
-    [TestMethod]
-    public async Task AProjectWrittenAsPgDumpWritesABaseTypeBuildsAndConverges()
-    {
-        var databaseName = await CreateDatabaseAsync("g241p");
-        var projectDirectory = CreateProjectDirectory("g241p");
-        try
-        {
-            var connectionString = ConnectionStringFor(databaseName);
-            var projectFile = ProjectFile(projectDirectory);
-            WriteSchema(projectDirectory, BaseTypeSql + "ALTER FUNCTION public.xint4in(cstring) OWNER TO postgres;\nALTER TYPE public.xint4 OWNER TO postgres;\n" + UsesSql);
-
-            var built = await RunAsync("build", "--project", projectFile);
-            Assert.AreEqual(0, built.ExitCode, built.Output);
-            Assert.IsFalse(built.Output.Contains("Duplicate Type definition", StringComparison.Ordinal), built.Output);
-            StringAssert.Contains(built.Output, "CREATE TYPE (shell type) is not modeled");
-            StringAssert.Contains(built.Output, "CREATE TYPE (base type) is not modeled");
-            StringAssert.Contains(built.Output, "Base type public.xint4 is not modeled, so the functions it names are left out with it: public.xint4in, public.xint4out.");
-
-            // The type is the database's to create; with it there, what the project states publishes, and the type's functions are neither created nor dropped.
-            await ExecuteAsync(connectionString, BaseTypeSql);
-            var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
-            Assert.AreEqual(0, published.ExitCode, "publish --execute failed.\n" + published.Output);
-            Assert.AreEqual("2", await ScalarTextAsync(connectionString, "SELECT count(*)::text FROM pg_proc WHERE proname IN ('xint4in', 'xint4out')"));
-            await AssertDiffIsEmptyAsync(projectFile, connectionString);
-        }
-        finally
-        {
-            await DropDatabaseAsync(databaseName);
-            TryDeleteDirectory(projectDirectory);
         }
     }
 }

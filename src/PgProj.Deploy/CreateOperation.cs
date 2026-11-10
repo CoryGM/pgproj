@@ -1132,6 +1132,13 @@ public sealed record class CreateOperation : SqlOperation
             return AppendTypeComment(type, GenerateCreateDomain(type, qualifiedName));
         }
 
+        // A base type is created as the project wrote it (G-267), after its shell and its support functions (BaseTypeShellOperation); built from its options only for
+        // a model made in code.
+        if (type.IsBaseType)
+        {
+            return AppendTypeComment(type, (type.BaseTypeWrittenText ?? BuildBaseTypeSql(type, qualifiedName)) + ";");
+        }
+
         // A composite type with no fields is deployed too (G-268).
         if (type.CompositeFields.Count > 0 || type.IsComposite)
         {
@@ -1182,6 +1189,61 @@ public sealed record class CreateOperation : SqlOperation
         // Enum types are not currently modeled structurally; emit a clearly-marked TODO rather
         // than inventing behavior (G-13).
         return $"-- TODO: Generate CREATE TYPE SQL for '{type.Key}'. Enum types are not yet captured structurally.";
+    }
+
+    /// <summary>A base type's <c>CREATE TYPE</c> from its options (G-267), every option explicit, as <c>init</c> writes one; for a model made in code.</summary>
+    internal static string BuildBaseTypeSql(TypeDefinition type, string qualifiedName)
+    {
+        var options = type.BaseTypeOptions ?? new BaseTypeOptionsDefinition();
+        var parts = new List<string>();
+        foreach (var option in BaseTypeOptionsDefinition.FunctionOptions)
+        {
+            if (options.WrittenFunctions.TryGetValue(option, out var written) || options.Functions.TryGetValue(option, out written))
+            {
+                parts.Add($"{option} = {written}");
+            }
+        }
+
+        if (options.Like is { } like)
+        {
+            parts.Add($"LIKE = {like}");
+        }
+
+        if (options.InternalLength is { } length)
+        {
+            parts.Add($"INTERNALLENGTH = {(length < 0 ? "VARIABLE" : length.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
+        }
+
+        if (options.PassedByValue == true)
+        {
+            parts.Add("PASSEDBYVALUE");
+        }
+
+        if (options.Alignment is { } alignment)
+        {
+            parts.Add($"ALIGNMENT = {alignment switch { "c" => "char", "s" => "int2", "d" => "double", _ => "int4" }}");
+        }
+
+        if (options.Storage is { } storage)
+        {
+            parts.Add($"STORAGE = {storage switch { "e" => "external", "m" => "main", "x" => "extended", _ => "plain" }}");
+        }
+
+        parts.Add($"CATEGORY = {QuoteLiteral(options.Category)}");
+        parts.Add($"PREFERRED = {(options.Preferred ? "true" : "false")}");
+        if (options.Default is { } defaultValue)
+        {
+            parts.Add($"DEFAULT = {QuoteLiteral(defaultValue)}");
+        }
+
+        if (options.Element is { } element)
+        {
+            parts.Add($"ELEMENT = {element}");
+        }
+
+        parts.Add($"DELIMITER = {QuoteLiteral(options.Delimiter)}");
+        parts.Add($"COLLATABLE = {(options.Collatable ? "true" : "false")}");
+        return $"CREATE TYPE {qualifiedName} ({string.Join(", ", parts)})";
     }
 
     private static string AppendTypeComment(TypeDefinition type, string sql)

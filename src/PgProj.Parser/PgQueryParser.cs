@@ -718,7 +718,7 @@ public sealed partial class PgQueryParser
                             AddIfNotNull(nodes, TypeStatementReader.ReadRangeType(property.Value, statementSql));
                             break;
                         case "DefineStmt":
-                            AddIfNotNull(nodes, TypeStatementReader.ReadBaseType(property.Value));
+                            AddIfNotNull(nodes, TypeStatementReader.ReadBaseType(property.Value, statementSql));
                             if (string.Equals(TryGetDirectStringProperty(property.Value, "kind"), "OBJECT_OPERATOR", StringComparison.Ordinal)
                                 && TryCreateOperatorNode(property.Value) is { } operatorNode)
                             {

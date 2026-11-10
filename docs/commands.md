@@ -103,7 +103,7 @@ Not read by pgproj, so absent from the scaffolded project even if the database h
   - subscriptions
   - operator classes and families
   - conversions
-  - base types (CREATE TYPE with INPUT and OUTPUT functions), with their input and output functions
+  - shell types with no definition (a base type is scaffolded, with its functions)
   - languages
   - transforms
   - access methods
@@ -117,7 +117,7 @@ Run 'pgproj build' to validate the scaffolded project.
 
 The list of kinds pgproj does not read is also in `pgproj init --help`; `--quiet` leaves it out of the output. Everything else a database
 can hold is scaffolded, including event triggers, casts, operators, aggregates, collations, text search dictionaries and
-configurations, publications, rules, and extended statistics. See [What is supported](notes/supported-objects.md). A base type is left out with its input and output functions, and `init` names it ([base types](notes/base-types.md)). An index PostgreSQL marks `INVALID` (left by a failed `CREATE INDEX CONCURRENTLY`) is left out, as `pg_dump` leaves it out, and `init` names it.
+configurations, publications, rules, and extended statistics. See [What is supported](notes/supported-objects.md). A base type is written with its shell and its support functions in its own file ([base types](notes/base-types.md)); a shell left without a definition is left out, and `init` names it. An index PostgreSQL marks `INVALID` (left by a failed `CREATE INDEX CONCURRENTLY`) is left out, as `pg_dump` leaves it out, and `init` names it.
 
 #### The report
 
@@ -297,7 +297,7 @@ Options:
   changed to a type that can lose a value; a cast, operator, aggregate, rule, publication, or event trigger that is dropped and not created
   again; a revoked grant or role membership; or a changed owner). Without it, `--execute` refuses such a script and lists the operations.
 - `--allow-superuser-statements` - let `--execute` run statements only a superuser can run: an event trigger created, changed, or dropped, a table's foreign-key triggers enabled or disabled (`ALTER TABLE ... TRIGGER ALL`),
-  and a function or procedure created or replaced `LEAKPROOF` or in an untrusted language (`c`, `internal`, `plpython3u`, ...). Without it,
+  a function or procedure created or replaced `LEAKPROOF` or in an untrusted language (`c`, `internal`, `plpython3u`, ...), and a base type or its shell created, or its options changed with `ALTER TYPE ... SET`. Without it,
   `--execute` refuses such a script, even for a superuser; with it, a role that is not a superuser is refused before anything runs (see
   [Statements only a superuser can run](notes/superuser-statements.md)).
 - `--allow-lock-limit` - let `--execute` run a script estimated to need more locks than the server's lock table holds

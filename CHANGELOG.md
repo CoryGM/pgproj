@@ -72,6 +72,14 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   default. `CREATE`, which `PUBLIC` has there only on PostgreSQL 14, is compared only when the project revokes it, and never given back. **If a database
   revoked `PUBLIC`'s `USAGE` on `public` and the project does not say so, `diff` now reports it, and `publish` gives it back** after the warning: add the
   `REVOKE` to the project (`init` writes it), or set `excludeGrants` ([Privileges on the public schema](docs/notes/public-schema-privileges.md)).
+- **Base types are modeled:** `CREATE TYPE name (INPUT = ..., OUTPUT = ...)`, written as `pg_dump` writes it (a shell, the input and output functions, the
+  definition), is deployed, read back from the database, compared, and written by `init` in the type's file with its shell and functions. Before, `build`
+  warned about it and left it and its functions out, and the type had to be created by hand. `publish` creates the shell, the functions, then the type as
+  written, and runs them only with `--allow-superuser-statements`, since PostgreSQL lets only a superuser create a base type. `RECEIVE`, `SEND`,
+  `TYPMOD_IN`, `TYPMOD_OUT`, `ANALYZE`, `SUBSCRIPT`, and `STORAGE` are changed in place with `ALTER TYPE ... SET`; any other change drops the type and its
+  functions and creates them again, or is refused, naming what uses the type, when something does. A removed type is dropped with `CASCADE`, after a
+  check that only its own functions depend on it. Every option is compared with PostgreSQL's default for one not stated, and `LIKE` with the values the
+  database has ([Base types](docs/notes/base-types.md)).
 
 ### Library
 

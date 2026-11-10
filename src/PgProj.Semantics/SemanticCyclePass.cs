@@ -49,6 +49,8 @@ internal sealed class SemanticCyclePass
                 .Where(reference => !string.IsNullOrWhiteSpace(reference))
                 .Where(nodes.ContainsKey)
                 .Where(reference => !string.Equals(reference, pair.Key, StringComparison.Ordinal))
+                // A base type's support function refers to the type, which a shell stands in for (G-267).
+                .Where(reference => !BaseTypeSupport.IsShellEdge(model, pair.Value, reference))
                 .Distinct(PgProj.Parser.SqlIdentifiers.NameComparer)
                 .ToArray(),
             PgProj.Parser.SqlIdentifiers.NameComparer);

@@ -138,7 +138,11 @@ internal sealed class SemanticGraphPass
         // TODO: Group nodes by script phase (pre: types/tables, main: views/functions/indexes, post: constraints/grants).
     }
 
+    /// <summary>A node's dependencies, without the edge from a base type's support function to the type, which a shell stands in for (G-267).</summary>
     private static IEnumerable<string> GetDependencies(ISemanticNode node, DatabaseModel model)
+        => GetAllDependencies(node, model).Where(reference => !BaseTypeSupport.IsShellEdge(model, node, reference));
+
+    private static IEnumerable<string> GetAllDependencies(ISemanticNode node, DatabaseModel model)
     {
         foreach (var table in node.ResolvedTables)
         {

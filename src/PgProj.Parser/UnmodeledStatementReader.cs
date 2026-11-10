@@ -245,16 +245,8 @@ internal static class UnmodeledStatementReader
                     return new Finding("CREATE COLLATION ... FROM", Ignored);
                 }
 
-                // A base type or shell type is not modeled (G-241): it needs C or internal functions and a superuser. The statement is still read, so its
-                // support functions can be left out with it (BaseTypeApplier).
-                if (defineKind == "OBJECT_TYPE")
-                {
-                    return body.TryGetProperty("definition", out var typeDefinition) && typeDefinition.ValueKind == JsonValueKind.Array && typeDefinition.GetArrayLength() > 0
-                        ? new Finding("CREATE TYPE (base type)", "is not modeled (a base type needs C or internal functions and a superuser); the statement and the functions it names are ignored", ReadStatement: true)
-                        : new Finding("CREATE TYPE (shell type)", Ignored, ReadStatement: true);
-                }
-
-                return defineKind is "OBJECT_OPERATOR" or "OBJECT_AGGREGATE" or "OBJECT_COLLATION" or "OBJECT_TSDICTIONARY" or "OBJECT_TSCONFIGURATION" ? null : new Finding($"CREATE {ObjectKind(defineKind)}", Ignored);
+                // A base type is modeled (G-267), and so is its shell when the project defines the type; BaseTypeApplier warns about a shell alone, which needs every file.
+                return defineKind is "OBJECT_TYPE" or "OBJECT_OPERATOR" or "OBJECT_AGGREGATE" or "OBJECT_COLLATION" or "OBJECT_TSDICTIONARY" or "OBJECT_TSCONFIGURATION" ? null : new Finding($"CREATE {ObjectKind(defineKind)}", Ignored);
             case "CommentStmt":
                 var commentTarget = String(body, "objtype");
                 return commentTarget is not null && ModeledCommentTargets.Contains(commentTarget)

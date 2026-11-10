@@ -13,7 +13,7 @@ internal sealed record SuperuserStatement(ChangeNodeKind NodeKind, string NodeId
 /// <c>--allow-superuser-statements</c>, which is consent for this run, not a role switch: without it the script is refused before anything runs, even for a superuser, and with
 /// it a role that is not a superuser is refused up front instead of partway through. Known from the statement, not from the server's answer: any statement on an event trigger
 /// (an event trigger's owner must be a superuser, G-127), a routine created or replaced <c>LEAKPROOF</c> (G-197), and a routine created or replaced in an untrusted language
-/// (<c>c</c>, <c>internal</c>, or one the server marks untrusted, such as <c>plpython3u</c>; G-211). G-261 (a table's internal triggers, <c>TRIGGER ALL</c>) is on it; G-267 adds to it when it is done.
+/// (<c>c</c>, <c>internal</c>, or one the server marks untrusted, such as <c>plpython3u</c>; G-211). G-261 (a table's internal triggers, <c>TRIGGER ALL</c>) is on it, and G-267's base types: their shells, their <c>CREATE TYPE</c>, and <c>ALTER TYPE ... SET</c>.
 /// </summary>
 internal static class SuperuserStatements
 {
@@ -60,6 +60,19 @@ internal static class SuperuserStatements
             if (operation is InternalTriggerStateOperation)
             {
                 Add(operation.NodeKind, operation.NodeId, "only a superuser can enable or disable a table's internal (foreign-key) triggers (TRIGGER ALL)");
+                continue;
+            }
+
+            // A base type, and its shell, are created only by a superuser, and its options changed only by one, even by its owner (G-267, checked on 14 to 18).
+            if (operation is BaseTypeShellOperation or CreateOperation { Node: TypeDefinition { IsBaseType: true } })
+            {
+                Add(operation.NodeKind, operation.NodeId, "only a superuser can create a base type or its shell");
+                continue;
+            }
+
+            if (operation is AlterOperation { Change.NewNode: TypeDefinition { IsBaseType: true } } alter && alter.GenerateSql().Contains(" SET (", StringComparison.Ordinal))
+            {
+                Add(operation.NodeKind, operation.NodeId, "only a superuser can change a base type's options (ALTER TYPE ... SET)");
                 continue;
             }
 

@@ -75,6 +75,8 @@ internal static class DiffPropertyLabels
         ["IsInitiallyDeferred"] = "Initially deferred",
         ["IsRowLevel"] = "For each row",
         ["EnumLabels"] = "Labels",
+        // A base type's CREATE TYPE (...) options (G-267).
+        ["BaseTypeOptions"] = "Options",
         ["ExtensionVersion"] = "Version",
         ["LcCollate"] = "LC_COLLATE",
         ["LcCtype"] = "LC_CTYPE",

@@ -203,12 +203,11 @@ public sealed partial class LiveDatabaseModelLoader
             where c.oid >= 16384 and (@schemas is null or n.nspname = any(@schemas))
               and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_conversion'::regclass and d.objid = c.oid and d.deptype = 'e')
             union all
-            -- A base type, or a shell type left without a definition (G-241); an array type PostgreSQL made for one is not listed.
-            select n.nspname, case t.typtype when 'b' then 'Base type' else 'Shell type' end, t.typname
+            -- A shell type left without a definition (G-241); a base type is scaffolded since G-267.
+            select n.nspname, 'Shell type', t.typname
             from pg_catalog.pg_type t
             inner join pg_catalog.pg_namespace n on n.oid = t.typnamespace
-            where t.oid >= 16384 and (t.typtype = 'b' or (t.typtype = 'p' and not t.typisdefined))
-              and not exists (select 1 from pg_catalog.pg_type element where element.typarray = t.oid)
+            where t.oid >= 16384 and t.typtype = 'p' and not t.typisdefined
               and (@schemas is null or n.nspname = any(@schemas))
               and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_type'::regclass and d.objid = t.oid and d.deptype = 'e')
             union all
@@ -442,11 +441,24 @@ public sealed partial class LiveDatabaseModelLoader
             }
         }
 
+        var supportFunctionsWritten = new HashSet<LiveFunctionSnapshot>();
         foreach (var type in types.Where(static type => !type.IsExtension).OrderBy(static type => type.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static type => type.TypeName, StringComparer.OrdinalIgnoreCase))
         {
             var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(type.SchemaName)}/Type/{SanitizeSegment(type.TypeName)}.sql", usedPaths);
 
             var builder = GetOrCreateFile(relativePath);
+
+            // A base type's file holds its shell, its support functions, and its definition, in the order they run (G-267, item 6), as pg_dump writes them.
+            if (type.IsBaseType)
+            {
+                builder.Append("CREATE TYPE ").Append(QualifyIdentifier(type.SchemaName, type.TypeName)).AppendLine(";");
+                foreach (var function in functions.Where(function => type.SupportFunctions.Contains($"{function.SchemaName}.{function.FunctionName}({function.IdentityArguments})", StringComparer.Ordinal)))
+                {
+                    AppendFunction(builder, function, relativePath);
+                    supportFunctionsWritten.Add(function);
+                }
+            }
+
             builder.Append(type.Statement.Trim().TrimEnd(';')).AppendLine(";");
             pathByOwnerKey[OwnerKey("type", type.SchemaName, type.TypeName, string.Empty)] = relativePath;
             pathByOwnerKey[OwnerKey("domain", type.SchemaName, type.TypeName, string.Empty)] = relativePath;
@@ -755,11 +767,17 @@ public sealed partial class LiveDatabaseModelLoader
             Record(null, "Publication", publication.Name, relativePath);
         }
 
-        foreach (var function in functions.OrderBy(static function => function.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.FunctionName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.IdentityArguments, StringComparer.OrdinalIgnoreCase))
+        // A base type's support functions are already in its file.
+        foreach (var function in functions.Where(function => !supportFunctionsWritten.Contains(function)).OrderBy(static function => function.SchemaName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.FunctionName, StringComparer.OrdinalIgnoreCase).ThenBy(static function => function.IdentityArguments, StringComparer.OrdinalIgnoreCase))
         {
             var kindFolder = function.IsProcedure ? "Procedure" : "Function";
             var relativePath = MakeUniquePath($"Schema/{SanitizeSegment(function.SchemaName)}/{kindFolder}/{SanitizeSegment(function.FunctionName)}.sql", usedPaths);
-            var builder = GetOrCreateFile(relativePath);
+            AppendFunction(GetOrCreateFile(relativePath), function, relativePath);
+        }
+
+        // A function's definition and comment, and where its grants and owner go.
+        void AppendFunction(StringBuilder builder, LiveFunctionSnapshot function, string relativePath)
+        {
             builder.Append(function.FunctionDefinition.Trim().TrimEnd(';')).AppendLine(";");
             if (!string.IsNullOrEmpty(function.Comment))
             {

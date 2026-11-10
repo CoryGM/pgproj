@@ -200,10 +200,10 @@ public sealed partial class PgProjEngine
             messages.Add(new(EngineEventLevel.Information, $"Set \"searchPath\" to [{string.Join(", ", neededSearchPath.Select(static schema => $"\"{schema}\""))}, \"public\"]: objects in {(neededSearchPath.Count == 1 ? "that schema use" : "those schemas use")} unqualified names that the database found through its search_path."));
         }
 
-        // A base type is not modeled (G-241): it and its input and output functions are left out, and what uses it needs it created first.
-        if (scaffold.UnsupportedObjects.Where(static item => item.ObjectType is "Base type" or "Shell type").Select(static item => $"{item.SchemaName}.{item.Name}").ToArray() is { Length: > 0 } baseTypes)
+        // A base type is scaffolded since G-267, and publishing it needs a superuser and --allow-superuser-statements; a shell type with no definition is left out.
+        if (scaffold.UnsupportedObjects.Where(static item => item.ObjectType == "Shell type").Select(static item => $"{item.SchemaName}.{item.Name}").ToArray() is { Length: > 0 } shells)
         {
-            messages.Add(new(EngineEventLevel.Warning, $"Left out {(baseTypes.Length == 1 ? "a base type" : "base types")}, with {(baseTypes.Length == 1 ? "its" : "their")} input and output functions: {string.Join(", ", baseTypes)}. pgproj does not model base types (they need a superuser); create {(baseTypes.Length == 1 ? "it" : "them")} before publishing anything that uses {(baseTypes.Length == 1 ? "it" : "them")}, for example in a predeploy script run by a superuser."));
+            messages.Add(new(EngineEventLevel.Warning, $"Left out {(shells.Length == 1 ? "a shell type" : "shell types")} with no definition (CREATE TYPE name; and nothing after it): {string.Join(", ", shells)}. pgproj models a base type with its definition, not a shell alone."));
         }
 
         // An INVALID index is left out as pg_dump leaves it out (G-271): it is not used by queries, and the project should state the index it was meant to be.

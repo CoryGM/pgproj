@@ -267,6 +267,13 @@ public sealed class DependencyAnalyzer
                 AddBodySequenceDependencies(model, function.SchemaName, function.Language, function.RawBody, dependencyIds);
                 AddDeclaredVariableDependencies(model, function.SchemaName, function.Language, function.RawBody, dependencyIds);
 
+                // A base type's support function is created before the type, which needs it, while a shell stands in for the type (G-267): the type and its
+                // functions refer to each other, and the edge from the function is the one that goes.
+                foreach (var baseType in BaseTypesSupportedBy(model, function))
+                {
+                    dependencyIds.Remove(baseType.Key);
+                }
+
                 // TODO: Add deeper function dependency extraction for argument types.
                 break;
 
@@ -425,6 +432,16 @@ public sealed class DependencyAnalyzer
                 dependencyIds.Add(rule.Key);
             }
         }
+    }
+
+    /// <summary>The base types of <paramref name="model"/> that name <paramref name="function"/> as one of their support functions (G-267).</summary>
+    public static IEnumerable<TypeDefinition> BaseTypesSupportedBy(DatabaseModel model, FunctionDefinition function)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(function);
+
+        var name = $"{function.SchemaName ?? "public"}.{function.Name}";
+        return model.Types.Values.Where(type => type.BaseTypeOptions?.Functions.Values.Contains(name, StringComparer.Ordinal) == true);
     }
 
     private static void AddGrantedObjectDependencies(DatabaseModel model, GrantDefinition grant, ISet<string> dependencyIds)

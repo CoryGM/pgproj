@@ -1,4 +1,4 @@
-﻿using PgProj.Dependencies;
+using PgProj.Dependencies;
 using PgProj.Diff;
 using PgProj.Semantics;
 
@@ -69,6 +69,30 @@ public sealed partial class ScriptGenerator
         var deferredRemovals = FindDeferredRemovals(graph, removedByNodeId.Keys, orderedNodeIdSet);
 
         var replaceInPlace = FindRoutinesReplacedInPlace(modifiedChanges, graph, orderedNodeIdSet);
+
+        // A base type the script drops, to remove it or to create it again, is dropped with CASCADE, which takes its support functions with it (G-267): they are not
+        // dropped on their own, and those of a type created again are created again before it.
+        var cascadedFunctions = FindCascadedSupportFunctions(removedChanges, modifiedChanges, graph);
+        var supportReasons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is TypeDefinition { IsBaseType: true } && IsDropAndRecreateObject(change)))
+        {
+            foreach (var node in graph.Nodes.Values.Where(node => graph.IsTargetNode(node.NodeId) && IsOwnSupportFunction(node.SemanticNode, (TypeDefinition)rebuilt.NewNode)))
+            {
+                cascadedFunctions.Add(node.NodeId);
+                supportReasons[node.NodeId] = $"its base type {rebuilt.NodeId} is dropped and created again, and its functions with it";
+                if (!addedByNodeId.ContainsKey(node.NodeId) && !modifiedByNodeId.ContainsKey(node.NodeId))
+                {
+                    modifiedByNodeId[node.NodeId] = new ModifiedChange
+                    {
+                        NodeId = node.NodeId,
+                        NodeKind = ChangeRecord.MapKind(node.SemanticNode),
+                        OldNode = node.SemanticNode,
+                        NewNode = node.SemanticNode,
+                        Details = [],
+                    };
+                }
+            }
+        }
 
         // The objects in the way of this publish are dropped before it and created again after it, from the project: those that use a
         // column a table alter drops or retypes (G-103), and those that use a routine it has to drop (G-105). One the project doesn't have
@@ -189,11 +213,12 @@ public sealed partial class ScriptGenerator
             orderedNodeIds = graph.TopologicalSort().Select(node => node.NodeId).ToArray();
         }
 
-        bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || typeSwaps.ContainsKey(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
+        bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || typeSwaps.ContainsKey(change.NodeId) || supportReasons.ContainsKey(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
         string? DropReason(string nodeId)
             => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is dropped here and recreated below: {RebuildReason(nodeId)}." : null;
         string? CreateReason(string nodeId)
-            => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is recreated; it was dropped above because {RebuildReason(nodeId)}." : null;
+            => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is recreated; it was dropped above because {RebuildReason(nodeId)}."
+                : supportReasons.TryGetValue(nodeId, out var supportReason) ? $"{nodeId} is recreated: {supportReason}." : null;
         string RebuildReason(string nodeId) => rebuilds.Reasons.TryGetValue(nodeId, out var reason) ? reason : indexReasons[nodeId];
 
         // Defaults and domain CHECKs are detached before anything is dropped and put back once everything has been created (G-105).
@@ -204,7 +229,7 @@ public sealed partial class ScriptGenerator
         // DROP is never emitted before its dependent's DROP (G-27).
         foreach (var nodeId in orderedNodeIds.Reverse())
         {
-            if (!deferredRemovals.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var removed))
+            if (!deferredRemovals.Contains(nodeId) && !cascadedFunctions.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var removed))
             {
                 operations.Add(new DropOperation
                 {
@@ -226,7 +251,7 @@ public sealed partial class ScriptGenerator
                     Reason = $"{swapped.NodeId} {(swap.IsEnum ? "loses or reorders a label" : "retypes a field")} while columns use it: it is kept as {EnumSwapRenameOperation.OldName(swap.NewType.Name)}, created again below, its columns moved to it, and then dropped.",
                 });
             }
-            else if (modifiedByNodeId.TryGetValue(nodeId, out var modified) && Recreates(modified))
+            else if (modifiedByNodeId.TryGetValue(nodeId, out var modified) && Recreates(modified) && !cascadedFunctions.Contains(nodeId))
             {
                 operations.Add(new DropOperation
                 {
@@ -309,7 +334,7 @@ public sealed partial class ScriptGenerator
         // Phase 3: the drops that had to wait for an alter (G-52), still dependent-first among themselves.
         foreach (var nodeId in orderedNodeIds.Reverse())
         {
-            if (deferredRemovals.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var deferred))
+            if (deferredRemovals.Contains(nodeId) && !cascadedFunctions.Contains(nodeId) && removedByNodeId.TryGetValue(nodeId, out var deferred))
             {
                 operations.Add(new DropOperation
                 {
@@ -337,7 +362,7 @@ public sealed partial class ScriptGenerator
             AddModifiedOperations(operations, modified, replaceInPlace);
         }
 
-        AddUnorderedOperations(operations, removedChanges, orderedNodeIdSet, static removedChange => new DropOperation
+        AddUnorderedOperations(operations, removedChanges.Where(change => !cascadedFunctions.Contains(change.NodeId)), orderedNodeIdSet, static removedChange => new DropOperation
         {
             NodeId = removedChange.NodeId,
             NodeKind = removedChange.NodeKind,
@@ -347,7 +372,7 @@ public sealed partial class ScriptGenerator
         // A dropped and recreated object loses its privileges; the grants the project keeps on it are issued again after it is created
         // (G-116). A grant being added, removed, or changed in this publish already has its own operation.
         var changedGrantIds = addedByNodeId.Keys.Concat(removedByNodeId.Keys).Concat(modifiedByNodeId.Keys).ToHashSet(PgProj.Parser.SqlIdentifiers.NameComparer);
-        operations = InsertRegrants(operations, graph, changedGrantIds);
+        operations = InsertRegrants(InsertBaseTypeShells(operations), graph, changedGrantIds);
 
         return new OperationBatch
         {
@@ -1020,9 +1045,19 @@ public sealed partial class ScriptGenerator
             ChangeNodeKind.Type => !(modified.NewNode is TypeDefinition extension && SqlOperation.IsExtension(extension))
                 && !IsChangeOnlyTo<TypeDefinition>(modified, nameof(TypeDefinition.Comment), nameof(TypeDefinition.ColumnComments))
                 && !IsAdditiveEnumChange(modified) && !IsCommentOnlyTypeChange(modified) && !IsAlterSafeDomainChange(modified)
-                && !IsAlterSafeCompositeChange(modified),
+                && !IsAlterSafeCompositeChange(modified) && !IsAlterSafeBaseTypeChange(modified),
             _ => false,
         };
+
+    /// <summary>
+    /// True when a base type's change (G-267, the user's design of 2026-11-09, item 3) is only to the options <c>ALTER TYPE ... SET</c> changes in place
+    /// (<see cref="BaseTypeOptionsDefinition.AlterableOptions"/>) and its comment; any other change drops the type and its support functions and creates them again.
+    /// </summary>
+    internal static bool IsAlterSafeBaseTypeChange(ModifiedChange modified)
+        => modified.OldNode is TypeDefinition { IsBaseType: true, BaseTypeOptions: { } oldOptions }
+            && modified.NewNode is TypeDefinition { IsBaseType: true, BaseTypeOptions: { } newOptions }
+            && modified.Details.All(static detail => detail.PropertyName is nameof(TypeDefinition.BaseTypeOptions) or nameof(TypeDefinition.Comment))
+            && oldOptions.DifferencesFrom(newOptions).All(BaseTypeOptionsDefinition.AlterableOptions.Contains);
 
     /// <summary>
     /// True when a modified domain's change can be deployed with in-place <c>ALTER DOMAIN</c> statements

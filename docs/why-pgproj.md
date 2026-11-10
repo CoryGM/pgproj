@@ -107,7 +107,7 @@ Notes on the table:
   expresses that directly; with pgproj it goes in a deploy script beside the structural change.
 - **You need more than PostgreSQL**, or a GUI, an approval workflow, continuous drift monitoring, or a support contract. pgproj is a PostgreSQL command
   line and library, before 1.0, maintained by one person.
-- **You need what pgproj does not model yet**: foreign data wrappers and foreign tables, subscriptions, and base types are reported, not deployed (the
+- **You need what pgproj does not model yet**: foreign data wrappers and foreign tables, and subscriptions are reported, not deployed (the
   [open issues](https://github.com/CoryGM/pgproj/issues) list them).
 
 Two things a state-based tool cannot guess, pgproj asks you to state: a **renamed column** is written with a `-- @renamed-from: old_name` comment, or

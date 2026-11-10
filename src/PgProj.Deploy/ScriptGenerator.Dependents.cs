@@ -213,12 +213,16 @@ public sealed partial class ScriptGenerator
     private static Dictionary<string, IReadOnlyList<string>> FindChangedObjectsInUse(IEnumerable<ModifiedChange> modifiedChanges, DependencyGraph graph)
     {
         var inUse = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var change in modifiedChanges.Where(static change => (change.NewNode is CollationDefinition or TextSearchDictionaryDefinition or TextSearchConfigurationDefinition or TypeDefinition { EnumLabels.Count: > 0 } || IsDomainCollationChange(change))
+        foreach (var change in modifiedChanges.Where(static change => (change.NewNode is CollationDefinition or TextSearchDictionaryDefinition or TextSearchConfigurationDefinition or TypeDefinition { EnumLabels.Count: > 0 } or TypeDefinition { IsBaseType: true } || IsDomainCollationChange(change))
                      && IsDropAndRecreateObject(change)))
         {
             // A routine, view, or other object that uses an enum is dropped and created again around it; what cannot be is a table (its columns) or another type.
+            // A base type is rebuilt only when nothing uses it but its own support functions, which it is dropped and created again with, and what is put back on it
+            // (G-267, the user's design of 2026-11-09, item 3: a rebuild under columns would be a later gap).
             var users = graph.GetDependents(change.NodeId)
-                .Where(node => change.NewNode is not TypeDefinition || node.SemanticNode is TableDefinition or ColumnDefinition or TypeDefinition)
+                .Where(node => change.NewNode is TypeDefinition { IsBaseType: true } baseType
+                    ? !IsOwnSupportFunction(node.SemanticNode, baseType) && node.SemanticNode is not (GrantDefinition or OwnerDefinition)
+                    : change.NewNode is not TypeDefinition || node.SemanticNode is TableDefinition or ColumnDefinition or TypeDefinition)
                 .Select(static node => node.NodeId)
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -230,6 +234,11 @@ public sealed partial class ScriptGenerator
 
         return inUse;
     }
+
+    /// <summary>True when <paramref name="node"/> is one of the functions <paramref name="baseType"/> names (G-267): its input, output, or another support function.</summary>
+    internal static bool IsOwnSupportFunction(ISemanticNode node, TypeDefinition baseType)
+        => node is FunctionDefinition function
+            && baseType.BaseTypeOptions?.Functions.Values.Contains($"{function.SchemaName ?? "public"}.{function.Name}", StringComparer.Ordinal) == true;
 
     /// <summary>A domain whose collation changed (G-196): PostgreSQL has no <c>ALTER DOMAIN ... COLLATE</c>, so it is dropped and created again.</summary>
     private static bool IsDomainCollationChange(ModifiedChange change)
@@ -247,6 +256,18 @@ public sealed partial class ScriptGenerator
                 NodeKind = change.NodeKind,
                 Message = $"The domain {change.NodeId} changes its collation, but PostgreSQL cannot do that in place and refuses to drop a domain that {userList} use{(users.Count == 1 ? "s" : string.Empty)}. "
                     + "pgproj does not rebuild what uses it: create the domain under a new name with the new collation, change those columns to it (ALTER COLUMN ... TYPE new_domain), drop the old domain, and rename the new one.",
+            };
+        }
+
+        if (change.NewNode is TypeDefinition { IsBaseType: true })
+        {
+            return new BlockedOperation
+            {
+                NodeId = change.NodeId,
+                NodeKind = change.NodeKind,
+                Message = $"The base type {change.NodeId} changes an option that PostgreSQL cannot change in place (ALTER TYPE ... SET changes only RECEIVE, SEND, TYPMOD_IN, TYPMOD_OUT, ANALYZE, SUBSCRIPT, and STORAGE), "
+                    + $"so it would have to be dropped and created again with its functions, and {userList} use{(users.Count == 1 ? "s" : string.Empty)} it. "
+                    + "pgproj does not rebuild what uses a base type: change those objects first, or make the change by hand.",
             };
         }
 

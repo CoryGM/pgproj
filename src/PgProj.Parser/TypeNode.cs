@@ -7,8 +7,11 @@ namespace PgProj.Parser;
 /// </summary>
 public sealed record TypeNode(string? Name, string? SchemaName, string RawStatementSql) : SqlNode("Type", Name, SchemaName)
 {
-    /// <summary><c>composite</c>, <c>enum</c>, or <c>range</c>; null for a shell or base type, which has no structure to capture.</summary>
+    /// <summary><c>composite</c>, <c>enum</c>, <c>range</c>, or <c>base</c> (G-267); a shell type is not a <see cref="TypeNode"/> (<see cref="BaseTypeNode"/>).</summary>
     public string? Form { get; init; }
+
+    /// <summary>A base type's options (G-267), in the order written, as pg_query read them; empty for any other kind of type.</summary>
+    public IReadOnlyList<BaseTypeOptionNode> BaseTypeOptions { get; init; } = [];
 
     /// <summary>
     /// Each composite field, in declaration order: its type as pg_query parsed it (G-99) and as written; empty for any other kind of type.
@@ -53,6 +56,13 @@ public sealed record CompositeFieldTypeNode(
     /// <summary>The field's <c>COLLATE</c>, its name parts joined with dots (<c>C</c>, <c>app.ci</c>), or null when it states none (G-192); not part of <see cref="RawType"/>.</summary>
     public string? CollationName { get; init; }
 }
+
+/// <summary>
+/// One option of a base type's definition (G-267): its name in lower case (<c>input</c>, <c>internallength</c>, <c>passedbyvalue</c>, ...), and its value as pg_query
+/// gives it: the name parts of a function, a type, or a keyword (<c>app</c>, <c>t_in</c>; <c>double</c>; <c>variable</c>), or the text of a string or number
+/// (<c>N</c>, <c>16</c>, <c>true</c>). An option written without a value (<c>PASSEDBYVALUE</c>) has neither.
+/// </summary>
+public sealed record BaseTypeOptionNode(string Name, IReadOnlyList<string> NameParts, string? Value);
 
 /// <summary>A label of an enum renamed from <see cref="From"/> to <see cref="To"/> (G-191), as the author's annotation says; labels are exact, as PostgreSQL compares them.</summary>
 public sealed record EnumLabelRename(string From, string To);

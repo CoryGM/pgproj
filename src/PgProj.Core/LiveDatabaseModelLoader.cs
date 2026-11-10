@@ -995,8 +995,54 @@ public sealed partial class LiveDatabaseModelLoader
             order by ns.nspname, typ.typname;
             """;
 
+        // A base type (G-267), every option written out as PostgreSQL stores it (LIKE and the defaults are stored as values), each function with its schema. Not the
+        // array type PostgreSQL makes for one (another type's typarray), an extension's, or a shell (typisdefined false), which is reported instead.
+        const string baseSql =
+            """
+            select ns.nspname as schema_name,
+                   typ.typname as type_name,
+                   'base' as type_kind,
+                   format('CREATE TYPE %I.%I (%s)', ns.nspname, typ.typname, concat_ws(', ',
+                       (select format('INPUT = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typinput),
+                       (select format('OUTPUT = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typoutput),
+                       (select format('RECEIVE = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typreceive),
+                       (select format('SEND = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typsend),
+                       (select format('TYPMOD_IN = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typmodin),
+                       (select format('TYPMOD_OUT = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typmodout),
+                       (select format('ANALYZE = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typanalyze),
+                       (select format('SUBSCRIPT = %I.%I', p_ns.nspname, p.proname) from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace where p.oid = typ.typsubscript),
+                       'INTERNALLENGTH = ' || case when typ.typlen < 0 then 'VARIABLE' else typ.typlen::text end,
+                       case when typ.typbyval then 'PASSEDBYVALUE' end,
+                       'ALIGNMENT = ' || case typ.typalign when 'c' then 'char' when 's' then 'int2' when 'd' then 'double' else 'int4' end,
+                       'STORAGE = ' || case typ.typstorage when 'e' then 'external' when 'm' then 'main' when 'x' then 'extended' else 'plain' end,
+                       'CATEGORY = ' || quote_literal(typ.typcategory::text),
+                       'PREFERRED = ' || typ.typispreferred::text,
+                       case when typ.typdefault is not null then 'DEFAULT = ' || quote_literal(typ.typdefault) end,
+                       case when typ.typelem <> 0 then 'ELEMENT = ' || pg_catalog.format_type(typ.typelem, null) end,
+                       'DELIMITER = ' || quote_literal(typ.typdelim::text),
+                       'COLLATABLE = ' || (typ.typcollation <> 0)::text)) as statement,
+                   pg_catalog.obj_description(typ.oid, 'pg_type') as type_comment,
+                   -- Its support functions by identity, for init to write them in the type's file, after its shell (item 6).
+                   array(select format('%s.%s(%s)', p_ns.nspname, p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid))
+                         from pg_catalog.pg_proc p join pg_catalog.pg_namespace p_ns on p_ns.oid = p.pronamespace
+                         where p.oid in (typ.typinput, typ.typoutput, typ.typreceive, typ.typsend, typ.typmodin, typ.typmodout, typ.typanalyze, typ.typsubscript)
+                           and p_ns.nspname <> 'pg_catalog'
+                         order by p.oid) as support_functions
+            from pg_catalog.pg_type typ
+            inner join pg_catalog.pg_namespace ns on ns.oid = typ.typnamespace
+            where typ.typtype = 'b'
+              and typ.typisdefined
+              and not exists (select 1 from pg_catalog.pg_type element_of where element_of.typarray = typ.oid)
+              and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
+              and ns.nspname not in ('pg_catalog', 'information_schema')
+              and ns.nspname not like 'pg_toast%'
+              and (@schemas is null or ns.nspname = any(@schemas))
+            order by ns.nspname, typ.typname;
+            """;
+
         var types = new List<LiveTypeSnapshot>();
         await ReadTypeStatementsAsync(connection, extensionSql, scopeSchemas, types, cancellationToken);
+        await ReadTypeStatementsAsync(connection, baseSql, scopeSchemas, types, cancellationToken);
         await ReadTypeStatementsAsync(connection, domainSql, scopeSchemas, types, cancellationToken);
         await ReadTypeStatementsAsync(connection, enumSql, scopeSchemas, types, cancellationToken);
         await ReadTypeStatementsAsync(connection, compositeSql, scopeSchemas, types, cancellationToken);
@@ -1026,6 +1072,12 @@ public sealed partial class LiveDatabaseModelLoader
             if (reader.FieldCount == 6 && string.Equals(reader.GetName(5), "column_comments", StringComparison.Ordinal))
             {
                 type = type with { ColumnCommentStatements = reader.GetFieldValue<string[]>(5) };
+            }
+
+            // A base type's support functions (G-267).
+            if (reader.FieldCount == 6 && string.Equals(reader.GetName(5), "support_functions", StringComparison.Ordinal))
+            {
+                type = type with { SupportFunctions = reader.GetFieldValue<string[]>(5) };
             }
 
             // An extension's version, the comment it comes with, and the extensions it requires (G-213).
@@ -1916,8 +1968,6 @@ public sealed partial class LiveDatabaseModelLoader
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
               -- A range type's constructor functions and its multirange's are created with the type (G-69).
               and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
-              -- A base type's support functions belong to the type, which is not modeled (G-241).
-              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
               and (@schemas is null or ns.nspname = any(@schemas))
@@ -3357,7 +3407,12 @@ internal sealed record LiveTypeSnapshot(string SchemaName, string TypeName, stri
     /// <summary>The names of the extensions an extension requires (G-213).</summary>
     internal IReadOnlyList<string> Requires { get; init; } = [];
 
+    /// <summary>A base type's support functions, each <c>schema.name(identity arguments)</c>, PostgreSQL's own left out (G-267).</summary>
+    internal IReadOnlyList<string> SupportFunctions { get; init; } = [];
+
     internal bool IsExtension => string.Equals(TypeKind, "extension", StringComparison.Ordinal);
+
+    internal bool IsBaseType => string.Equals(TypeKind, "base", StringComparison.Ordinal);
 
     /// <summary>
     /// True when someone changed an extension's comment from the one it comes with, removing it included (G-213). A project that does not state an extension's

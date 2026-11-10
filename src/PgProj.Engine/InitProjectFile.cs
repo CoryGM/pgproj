@@ -22,7 +22,7 @@ internal static partial class InitProjectFile
         "subscriptions",
         "operator classes and families",
         "conversions",
-        "base types (CREATE TYPE with INPUT and OUTPUT functions), with their input and output functions",
+        "shell types with no definition (a base type is scaffolded, with its functions)",
         "languages",
         "transforms",
         "access methods",

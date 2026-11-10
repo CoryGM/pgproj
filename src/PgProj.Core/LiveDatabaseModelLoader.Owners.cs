@@ -46,8 +46,10 @@ public sealed partial class LiveDatabaseModelLoader
                    n.nspname, t.typname, '', null, null, pg_catalog.pg_get_userbyid(t.typowner)
             from pg_catalog.pg_type t
             inner join pg_catalog.pg_namespace n on n.oid = t.typnamespace
-            where t.typtype in ('e', 'r', 'd', 'c')
+            where t.typtype in ('e', 'r', 'd', 'c', 'b')
               and (t.typtype <> 'c' or exists (select 1 from pg_catalog.pg_class rc where rc.oid = t.typrelid and rc.relkind = 'c'))
+              -- A base type (G-267), not the array type PostgreSQL made for one.
+              and (t.typtype <> 'b' or (t.typisdefined and not exists (select 1 from pg_catalog.pg_type element_of where element_of.typarray = t.oid)))
               and n.nspname not like 'pg\_%' and n.nspname <> 'information_schema'
             union all
             select 'operator', n.nspname, o.oprname, '',

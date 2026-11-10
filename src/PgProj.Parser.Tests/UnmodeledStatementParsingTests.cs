@@ -134,23 +134,18 @@ public sealed class UnmodeledStatementParsingTests
     }
 
     /// <summary>
-    /// G-241: a shell type and a base type are not modeled (the user's decision of 2026-10-13). This replaces the shell type's row in
-    /// <see cref="AModeledStatementHasNoSuchWarning"/>. The statement is still read, as a marker that names the functions to leave out with it.
+    /// G-267: a base type is modeled (the user's design of 2026-11-09), and a shell is one with it: neither is an unmodeled statement. A shell is still read as a marker,
+    /// and <see cref="BaseTypeApplier"/> warns about one only when no file of the project defines it. Replaces G-241's test, which had both warned about here.
     /// </summary>
     [TestMethod]
-    [DataRow("CREATE TYPE public.sh;", "CREATE TYPE (shell type) is not modeled; the statement is ignored: CREATE TYPE public.sh")]
-    [DataRow(
-        "CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout);",
-        "CREATE TYPE (base type) is not modeled (a base type needs C or internal functions and a superuser); the statement and the functions it names are ignored: CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout)")]
-    public void AShellOrBaseTypeIsAWarningAndOnlyAMarker(string sql, string message)
+    [DataRow("CREATE TYPE public.sh;", typeof(BaseTypeNode))]
+    [DataRow("CREATE TYPE public.b (INPUT = public.bin, OUTPUT = public.bout);", typeof(TypeNode))]
+    public void AShellOrBaseTypeIsNotAnUnmodeledStatement(string sql, Type nodeType)
     {
         var tree = Parse(sql);
 
-        var diagnostic = tree.Diagnostics.Single();
-        Assert.AreEqual(SqlDiagnosticSeverity.Warning, diagnostic.Severity);
-        Assert.AreEqual("UnmodeledStatement", diagnostic.Source);
-        Assert.AreEqual(message, diagnostic.Message);
-        Assert.IsInstanceOfType<BaseTypeNode>(tree.Nodes.Single());
+        Assert.IsEmpty(tree.Diagnostics);
+        Assert.IsInstanceOfType(tree.Nodes.Single(), nodeType);
     }
 
     [TestMethod]

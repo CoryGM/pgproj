@@ -136,8 +136,6 @@ public sealed partial class LiveDatabaseModelLoader
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
               -- A range type's constructor functions and its multirange's are created with the type (G-69).
               and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
-              -- A base type's support functions belong to the type, which is not modeled (G-241).
-              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
               and (@schemas is null or ns.nspname = any(@schemas))
@@ -181,8 +179,6 @@ public sealed partial class LiveDatabaseModelLoader
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_proc'::regclass and ext_dep.objid = proc.oid and ext_dep.deptype = 'e')
               -- A range type's constructor functions and its multirange's are created with the type (G-69).
               and not exists (select 1 from pg_catalog.pg_depend int_dep where int_dep.classid = 'pg_catalog.pg_proc'::regclass and int_dep.objid = proc.oid and int_dep.deptype = 'i' and int_dep.refclassid = 'pg_catalog.pg_type'::regclass)
-              -- A base type's support functions belong to the type, which is not modeled (G-241).
-              and not exists (select 1 from pg_catalog.pg_type base_type where base_type.typtype = 'b' and proc.oid in (base_type.typinput::oid, base_type.typoutput::oid, base_type.typreceive::oid, base_type.typsend::oid, base_type.typmodin::oid, base_type.typmodout::oid, base_type.typanalyze::oid, base_type.typsubscript::oid))
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
               and (@schemas is null or ns.nspname = any(@schemas));
@@ -285,7 +281,7 @@ public sealed partial class LiveDatabaseModelLoader
     }
 
     /// <summary>
-    /// Privileges on enum, composite, and range types and on domains (G-337), read as a project states them. A type whose list is null has PostgreSQL's default
+    /// Privileges on enum, composite, range, and base types (G-267) and on domains (G-337), read as a project states them. A type whose list is null has PostgreSQL's default
     /// (the owner and <c>PUBLIC</c> have <c>USAGE</c>) and is not reported. Once a grant or revoke has written the list out, each role but the owner is reported with
     /// a <c>GRANT</c>, and a list without <c>PUBLIC</c> as <c>REVOKE USAGE ... FROM PUBLIC</c>, the one revoke pgproj reads (option (B)). An array type has no
     /// privileges of its own (PostgreSQL refuses a grant on one), a table's row type is the table's, and a multirange type is made with its range type: none is read.
@@ -306,7 +302,9 @@ public sealed partial class LiveDatabaseModelLoader
               and acl.privilege_type = 'USAGE'
               and acl.grantee <> typ.typowner
               and (typ.typtype in ('e', 'r', 'd')
-                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c')))
+                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c'))
+                   -- A base type (G-267), not the array type PostgreSQL made for one (which has no privileges of its own).
+                   or (typ.typtype = 'b' and typ.typisdefined and not exists (select 1 from pg_catalog.pg_type element_of where element_of.typarray = typ.oid)))
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'
@@ -319,7 +317,9 @@ public sealed partial class LiveDatabaseModelLoader
             where typ.typacl is not null
               and not exists (select 1 from pg_catalog.aclexplode(typ.typacl) acl where acl.grantee <> typ.typowner and acl.privilege_type = 'USAGE')
               and (typ.typtype in ('e', 'r', 'd')
-                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c')))
+                   or (typ.typtype = 'c' and exists (select 1 from pg_catalog.pg_class rc where rc.oid = typ.typrelid and rc.relkind = 'c'))
+                   -- A base type (G-267), not the array type PostgreSQL made for one (which has no privileges of its own).
+                   or (typ.typtype = 'b' and typ.typisdefined and not exists (select 1 from pg_catalog.pg_type element_of where element_of.typarray = typ.oid)))
               and not exists (select 1 from pg_catalog.pg_depend ext_dep where ext_dep.classid = 'pg_catalog.pg_type'::regclass and ext_dep.objid = typ.oid and ext_dep.deptype = 'e')
               and ns.nspname not in ('pg_catalog', 'information_schema')
               and ns.nspname not like 'pg_toast%'

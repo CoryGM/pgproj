@@ -215,19 +215,13 @@ internal static class TypeStatementReader
         return null;
     }
 
-    /// <summary>The definition options of a base type that name a function (<c>CREATE TYPE</c>'s parameters, lower case as pg_query writes them).</summary>
-    private static readonly HashSet<string> SupportFunctionOptions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "input", "output", "receive", "send", "typmod_in", "typmod_out", "analyze", "subscript",
-    };
-
     /// <summary>
     /// <c>DefineStmt</c> is shared by several unrelated <c>CREATE</c> forms (operator, aggregate, collation, text
     /// search objects, ...), distinguished only by <c>kind</c>; only <c>OBJECT_TYPE</c> is a type: a shell type,
-    /// <c>CREATE TYPE name;</c> (no <c>definition</c>), or a base type with <c>INPUT</c>/<c>OUTPUT</c> functions. Neither is
-    /// modeled (G-241): the marker carries the functions the definition names, so they can be left out with the type.
+    /// <c>CREATE TYPE name;</c> (no <c>definition</c>), read as a <see cref="BaseTypeNode"/> marker, or a base type with <c>INPUT</c>/<c>OUTPUT</c> functions,
+    /// read as a <see cref="TypeNode"/> of form <c>base</c> with its options (G-267). The marker of a shell carries nothing; <see cref="BaseTypeApplier"/> takes it out.
     /// </summary>
-    public static BaseTypeNode? ReadBaseType(JsonElement element)
+    public static SqlNode? ReadBaseType(JsonElement element, string statementSql)
     {
         if (ReadDirectString(element, "kind") != "OBJECT_TYPE")
         {
@@ -240,24 +234,41 @@ internal static class TypeStatementReader
             return null;
         }
 
-        var functions = new List<BaseTypeSupportFunction>();
         var hasDefinition = element.TryGetProperty("definition", out var definition) && definition.ValueKind == JsonValueKind.Array && definition.GetArrayLength() > 0;
-        if (hasDefinition)
+        if (!hasDefinition)
         {
-            foreach (var item in definition.EnumerateArray())
+            return new BaseTypeNode(parts[^1], parts.Count > 1 ? parts[^2] : null, IsShell: true);
+        }
+
+        var options = new List<BaseTypeOptionNode>();
+        foreach (var item in definition.EnumerateArray())
+        {
+            if (!item.TryGetProperty("DefElem", out var option) || ReadDirectString(option, "defname") is not { } optionName)
             {
-                if (item.TryGetProperty("DefElem", out var option)
-                    && ReadDirectString(option, "defname") is { } optionName
-                    && SupportFunctionOptions.Contains(optionName)
-                    && option.TryGetProperty("arg", out var argument)
-                    && ReadFunctionNameParts(argument) is { Count: > 0 } functionParts)
-                {
-                    functions.Add(new BaseTypeSupportFunction(functionParts.Count > 1 ? functionParts[^2] : null, functionParts[^1]));
-                }
+                continue;
+            }
+
+            if (!option.TryGetProperty("arg", out var argument) || argument.ValueKind != JsonValueKind.Object)
+            {
+                options.Add(new BaseTypeOptionNode(optionName.ToLowerInvariant(), [], null));
+            }
+            else if (argument.TryGetProperty("Integer", out var integer))
+            {
+                options.Add(new BaseTypeOptionNode(optionName.ToLowerInvariant(), [], integer.TryGetProperty("ival", out var ival) ? ival.GetRawText() : "0"));
+            }
+            else if (argument.TryGetProperty("String", out _) || argument.TryGetProperty("Boolean", out _))
+            {
+                options.Add(new BaseTypeOptionNode(optionName.ToLowerInvariant(), [], argument.TryGetProperty("Boolean", out var boolean)
+                    ? (boolean.TryGetProperty("boolval", out var value) && value.GetBoolean() ? "true" : "false")
+                    : ReadNestedString(argument)));
+            }
+            else
+            {
+                options.Add(new BaseTypeOptionNode(optionName.ToLowerInvariant(), ReadFunctionNameParts(argument), null));
             }
         }
 
-        return new BaseTypeNode(parts[^1], parts.Count > 1 ? parts[^2] : null, !hasDefinition) { SupportFunctions = functions };
+        return new TypeNode(parts[^1], parts.Count > 1 ? parts[^2] : null, statementSql) { Form = "base", BaseTypeOptions = options };
     }
 
     /// <summary>A function named in a type's definition: pg_query writes it as a <c>TypeName</c> (<c>names</c>), a <c>List</c> of name parts, or a bare <c>String</c>.</summary>

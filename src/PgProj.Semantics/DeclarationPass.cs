@@ -652,7 +652,8 @@ internal sealed class DeclarationPass
 
         foreach (var typeNode in tree.Types)
         {
-            AddDefinition(types, CreateTypeDefinition(typeNode.SchemaName, typeNode.Name ?? "unknown_type", "user-defined") with { Location = Place(tree, typeNode) }, diagnostics);
+            // A base type is a kind of its own (G-267): it has options and support functions, not fields, labels, or a range.
+            AddDefinition(types, CreateTypeDefinition(typeNode.SchemaName, typeNode.Name ?? "unknown_type", typeNode.Form == "base" ? "base" : "user-defined") with { Location = Place(tree, typeNode) }, diagnostics);
         }
 
         foreach (var domainNode in tree.Domains)

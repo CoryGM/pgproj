@@ -2018,6 +2018,8 @@ public sealed class DiffEngine
         AddListDifference(details, nameof(TypeDefinition.CompositeFields), FormatCompositeFields(oldType.CompositeFields), FormatCompositeFields(newType.CompositeFields));
         AddListDifference(details, nameof(TypeDefinition.RangeOptions), FormatRangeOptions(oldType.RangeOptions, oldType.Name), FormatRangeOptions(newType.RangeOptions, newType.Name));
         AddOrderedListDifference(details, nameof(TypeDefinition.EnumLabels), oldType.EnumLabels, newType.EnumLabels);
+        // A base type's options (G-267), each with PostgreSQL's default filled in when unstated; the statement's text is not compared.
+        AddListDifference(details, nameof(TypeDefinition.BaseTypeOptions), FormatBaseTypeOptions(oldType.BaseTypeOptions), FormatBaseTypeOptions(newType.BaseTypeOptions));
 
         // An enum with no labels and a composite with no fields have nothing above to tell them apart (G-249, G-268); their form does. A type with any structure
         // already shows its change there, so this is reported only when the structure says nothing.
@@ -2438,6 +2440,37 @@ public sealed class DiffEngine
     {
         var parts = PgProj.Parser.SqlIdentifiers.SplitQualifiedName(name);
         return parts.Count == 2 && parts[0] is "public" or "pg_catalog" ? parts[1] : string.Join('.', parts);
+    }
+
+    /// <summary>A base type's options (G-267) as <c>NAME = value</c>, every one of them, in their comparison form; nothing for another kind of type.</summary>
+    internal static IEnumerable<string> FormatBaseTypeOptions(BaseTypeOptionsDefinition? options)
+    {
+        if (options is null)
+        {
+            yield break;
+        }
+
+        foreach (var option in BaseTypeOptionsDefinition.FunctionOptions)
+        {
+            yield return $"{option} = {options.Functions.GetValueOrDefault(option) ?? "NONE"}";
+        }
+
+        if (options.Like is { } like)
+        {
+            yield return $"LIKE = {like}";
+        }
+
+        string Unknown<T>(T? value, Func<T, string> format) where T : struct => value is { } known ? format(known) : "from LIKE";
+        yield return $"INTERNALLENGTH = {Unknown(options.InternalLength, static length => length < 0 ? "VARIABLE" : length.ToString(System.Globalization.CultureInfo.InvariantCulture))}";
+        yield return $"PASSEDBYVALUE = {Unknown(options.PassedByValue, static value => value ? "true" : "false")}";
+        yield return $"ALIGNMENT = {options.Alignment switch { "c" => "char", "s" => "int2", "i" => "int4", "d" => "double", _ => "from LIKE" }}";
+        yield return $"STORAGE = {options.Storage switch { "p" => "plain", "e" => "external", "m" => "main", "x" => "extended", _ => "from LIKE" }}";
+        yield return $"CATEGORY = '{options.Category}'";
+        yield return $"PREFERRED = {(options.Preferred ? "true" : "false")}";
+        yield return $"DEFAULT = {(options.Default is { } value ? "'" + value + "'" : "NONE")}";
+        yield return $"ELEMENT = {options.Element ?? "NONE"}";
+        yield return $"DELIMITER = '{options.Delimiter}'";
+        yield return $"COLLATABLE = {(options.Collatable ? "true" : "false")}";
     }
 
     private static IEnumerable<string> FormatRangeOptions(RangeTypeOptionsDefinition? options, string? rangeName)

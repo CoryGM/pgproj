@@ -66,9 +66,11 @@ public sealed record class AlterOperation : SqlOperation
         }
 
         var qualifiedName = FormatQualifiedName(newType.SchemaName, newType.Name);
-        var statements = IsCompositeChange(oldType, newType)
-            ? GenerateAlterCompositeFields(qualifiedName, oldType, newType)
-            : GenerateAddEnumValues(qualifiedName, oldType, newType);
+        var statements = newType.IsBaseType
+            ? GenerateAlterBaseType(qualifiedName, oldType, newType)
+            : IsCompositeChange(oldType, newType)
+                ? GenerateAlterCompositeFields(qualifiedName, oldType, newType)
+                : GenerateAddEnumValues(qualifiedName, oldType, newType);
 
         if (!string.Equals(oldType.Comment, newType.Comment, StringComparison.Ordinal))
         {
@@ -80,6 +82,32 @@ public sealed record class AlterOperation : SqlOperation
         // A composite type's fields' comments (G-216), after any field changes, so a field added here can take its comment.
         statements.AddRange(CommentSqlHelper.GenerateColumnCommentChanges(newType.SchemaName, newType.Name, oldType.ColumnComments, newType.ColumnComments));
         return string.Join("\n", statements);
+    }
+
+    /// <summary>
+    /// A base type's options that change in place (G-267, the user's design of 2026-11-09, item 3), in one <c>ALTER TYPE ... SET (...)</c>: a function as the project
+    /// writes it, or <c>NONE</c> when it no longer names one, and the storage. Only a superuser may run it, even the type's owner (checked on PostgreSQL 18).
+    /// </summary>
+    private static List<string> GenerateAlterBaseType(string qualifiedName, TypeDefinition oldType, TypeDefinition newType)
+    {
+        if (oldType.BaseTypeOptions is not { } oldOptions || newType.BaseTypeOptions is not { } newOptions)
+        {
+            return [];
+        }
+
+        var settings = new List<string>();
+        foreach (var option in oldOptions.DifferencesFrom(newOptions).Where(BaseTypeOptionsDefinition.AlterableOptions.Contains))
+        {
+            if (option == "STORAGE")
+            {
+                settings.Add($"STORAGE = {newOptions.Storage switch { "e" => "external", "m" => "main", "x" => "extended", _ => "plain" }}");
+                continue;
+            }
+
+            settings.Add($"{option} = {(newOptions.WrittenFunctions.TryGetValue(option, out var written) || newOptions.Functions.TryGetValue(option, out written) ? written : "NONE")}");
+        }
+
+        return settings.Count == 0 ? [] : [$"ALTER TYPE {qualifiedName} SET ({string.Join(", ", settings)});"];
     }
 
     /// <summary>

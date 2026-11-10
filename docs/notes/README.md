@@ -68,7 +68,7 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Tables written with LIKE](table-like.md) — `CREATE TABLE ... (LIKE source INCLUDING ...)` as written, and what it copies
 - [Composite types](composite-types.md) — fields added and dropped in place, and a type rebuilt under its columns when a field is retyped
 - [Enum types](enum-types.md) — labels added and renamed in place, and a type rebuilt under its columns when a label is removed or reordered
-- [Base types](base-types.md) — `CREATE TYPE ... (INPUT = ..., OUTPUT = ...)` is not modeled; its functions are left out with it
+- [Base types](base-types.md) — `CREATE TYPE ... (INPUT = ..., OUTPUT = ...)` with its shell and functions, behind `--allow-superuser-statements`
 - [Views, and other definitions PostgreSQL rewrites](views.md) — comparing by PostgreSQL's own rendering
 - [SQL-standard routine bodies](sql-standard-routine-bodies.md) — `BEGIN ATOMIC` and `RETURN`
 - [Routine options](routine-options.md) — `SET`, `COST`, `ROWS`, `PARALLEL`, `LEAKPROOF`, and `WINDOW`
