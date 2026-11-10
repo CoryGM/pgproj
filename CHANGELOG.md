@@ -26,8 +26,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   scripts could use only `tenant_schema` and `tenant_id` ([Variables in the deploy scripts](docs/notes/variables.md)).
 - **An enum type that loses or reorders a label is rebuilt under the columns that use it**, instead of being refused: the old type is renamed out of
   the way, the new one created, each column moved to it (arrays too), and the old one dropped, with the columns' defaults, and the views, checks, and
-  partial and expression indexes on them, put back. A removed label needs `--allow-destructive`, and a row that still holds it stops the publish in
-  words; a reorder does not need consent. A label marked `-- @renamed-label: old -> new` above the `CREATE TYPE` is renamed in place
+  partial and expression indexes on them, and the owner the project states for the type, put back. A removed label needs `--allow-destructive`, and
+  a row that still holds it stops the publish in words; a reorder does not need consent. A label marked `-- @renamed-label: old -> new` above the `CREATE TYPE` is renamed in place
   ([Enum types](docs/notes/enum-types.md)).
 - **`build` reports transaction control in the deploy scripts:** a `COMMIT`, `ROLLBACK`, or other statement that ends the transaction, and a statement
   PostgreSQL refuses inside one (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`, ...), are errors at their line, so `publish` does not run;

@@ -406,10 +406,13 @@ public sealed partial class ScriptGenerator
 
     private static List<SqlOperation> InsertRegrants(List<SqlOperation> operations, DependencyGraph graph, ISet<string> changedGrantIds)
     {
+        // A type rebuilt under its columns (G-191) is renamed out of the way rather than dropped, and the new one is just as new: it is owned by the role
+        // that deploys.
         var dropped = operations
             .OfType<DropOperation>()
             .Where(static operation => operation.NodeKind is not (ChangeNodeKind.Grant or ChangeNodeKind.Owner))
             .Select(static operation => operation.NodeId)
+            .Concat(operations.OfType<EnumSwapRenameOperation>().Select(static operation => operation.NodeId))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (dropped.Count == 0)
         {

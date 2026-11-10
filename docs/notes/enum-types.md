@@ -43,6 +43,7 @@ DROP TYPE "app"."mood_pgproj_old";
   they compare the column with the old type's labels. A plain index or key on the column is rebuilt by PostgreSQL as the column changes.
 - Changing a column's type rewrites its table under an `ACCESS EXCLUSIVE` lock, which blocks reads and writes for as long as it takes; `publish` warns
   about each table before anything runs ([Locks and large tables](locks.md)). `--concurrently` does not help here.
+- The owner the project states for the type is set on the new one.
 - A row that holds a removed label cannot be moved. The publish stops and is rolled back, nothing applied:
   `the column app.visits.mood holds a label the enum type app.mood no longer has, so the type was not rebuilt`. Change or delete those rows first (a
   pre-deploy script can: `UPDATE app.visits SET mood = 'sad' WHERE mood = 'ok';`), or keep the label.

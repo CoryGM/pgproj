@@ -118,6 +118,25 @@ public sealed class EnumLabelRemovalEndToEndTests
         });
     }
 
+    [TestMethod]
+    public async Task TheRebuiltTypeKeepsTheOwnerTheProjectStates()
+    {
+        await WithProjectAsync("g191own", async (connectionString, projectDirectory, projectFile) =>
+        {
+            await ExecuteAsync(connectionString, "DO $$ BEGIN CREATE ROLE g191_type_owner; EXCEPTION WHEN duplicate_object THEN NULL; END $$;");
+            WriteSchema(projectDirectory, Sql + "\nALTER TYPE public.mood OWNER TO g191_type_owner;\n");
+            var owned = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute", "--allow-destructive");
+            Assert.AreEqual(0, owned.ExitCode, owned.Output);
+            WriteSchema(projectDirectory, Edit(Sql, "('sad', 'ok', 'happy')", "('happy', 'ok', 'sad')") + "\nALTER TYPE public.mood OWNER TO g191_type_owner;\n");
+
+            var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
+
+            Assert.AreEqual(0, published.ExitCode, published.Output);
+            Assert.AreEqual("g191_type_owner", await ScalarTextAsync(connectionString, "SELECT typowner::regrole::text FROM pg_type WHERE oid = 'public.mood'::regtype"));
+            await AssertDiffIsEmptyAsync(projectFile, connectionString);
+        });
+    }
+
     private static async Task WithProjectAsync(string prefix, Func<string, string, string, Task> test)
     {
         var databaseName = await CreateDatabaseAsync(prefix);
