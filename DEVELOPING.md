@@ -8,7 +8,8 @@ This guide explains how to set up a development environment, understand the arch
 
 You will need:
 
-- .NET 10 SDK or later  
+- .NET 10 SDK 10.0.404 or a later 10.0 SDK. `global.json` pins it: the newest .NET 10 SDK installed is used (`rollForward: latestFeature`), never a later major version, even
+  where one is installed, as on a machine or CI runner that has .NET 11.  
 - PostgreSQL 14, 15, 16, 17, or 18 (local or remote). These are the versions the Docker suite is run against (G-120, G-269). The parser is
   libpg_query with PostgreSQL 18's grammar (NuGet `Npgquery`, native library only), which parses every version's SQL. The PostgreSQL 18
   schema features (`NOT ENFORCED`, temporal keys, `VIRTUAL` columns, `NOT NULL ... NOT VALID`; G-121) are supported, and a project that
