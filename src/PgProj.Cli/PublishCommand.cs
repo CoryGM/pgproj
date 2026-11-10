@@ -34,7 +34,8 @@ public static class PublishCommand
         {
             Description = "Allow --execute to run a script that can discard data or access: a dropped table, column, " +
                 "materialized view, extension, or composite type field; a changed column type that can lose a value (a widening such as varchar(50) " +
-                "to varchar(100) or int to bigint is not one); a cast, operator, aggregate, " +
+                "to varchar(100) or int to bigint is not one); a label removed from an enum type that columns use; a field of a composite type that " +
+                "columns use changed to a type that can lose a value; a cast, operator, aggregate, " +
                 "rule, publication, or event trigger that is dropped and not created again; a revoked grant or role membership; " +
                 "or a changed owner. Without this flag, --execute refuses to run such a script and lists the affected operations.",
         };

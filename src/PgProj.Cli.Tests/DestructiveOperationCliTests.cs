@@ -17,6 +17,7 @@ public sealed class DestructiveOperationCliTests
         foreach (var kind in new[]
         {
             "table", "column", "materialized view", "extension", "composite type field", "changed column type that can lose a value", "a widening",
+            "label removed from an enum type", "field of a composite type that columns use changed",
             "cast", "operator", "aggregate", "rule", "publication", "event trigger",
             "revoked grant or role membership", "changed owner",
         })

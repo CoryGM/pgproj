@@ -114,7 +114,8 @@ public sealed record PublishItem(PublishNoticeKind Kind, string Text, ChangeNode
 /// <param name="Items">What it names; empty when it names nothing.</param>
 /// <param name="Part">The part of a tenants publish it is for (<c>shared schemas</c> or a tenant's schema); null for the whole publish.</param>
 /// <param name="ForKeptScript">
-/// True when it is about the script as printed or written (G-316: the script is not wrapped in a transaction), so a shell shows it only when it keeps the script; a
+/// True when it is about the script as printed or written (G-316): that its <c>--concurrently</c> statements or its tenants' parts are not in one transaction
+/// (G-165), or that it keeps the deploy scripts' variables as placeholders (G-336); so a shell shows it only when it keeps the script; a
 /// plan always does.
 /// </param>
 public sealed record PublishNotice(PublishNoticeKind Kind, string Text, IReadOnlyList<PublishItem> Items, string? Part = null, bool ForKeptScript = false);

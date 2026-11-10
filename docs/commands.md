@@ -287,7 +287,8 @@ Options:
 - `--output <file>` - write the script to a file.
 - `--allow-destructive` - let `--execute` run a script that can discard data or access (a dropped table, column, materialized view,
   extension, or composite type field; a changed column type that can lose a value, so not a widening such as `varchar(50)` to
-  `varchar(100)` or `int` to `bigint`; a cast, operator, aggregate, rule, publication, or event trigger that is dropped and not created
+  `varchar(100)` or `int` to `bigint`; a label removed from an enum type that columns use; a field of a composite type that columns use
+  changed to a type that can lose a value; a cast, operator, aggregate, rule, publication, or event trigger that is dropped and not created
   again; a revoked grant or role membership; or a changed owner). Without it, `--execute` refuses such a script and lists the operations.
 - `--allow-superuser-statements` - let `--execute` run statements only a superuser can run: an event trigger created, changed, or dropped, a table's foreign-key triggers enabled or disabled (`ALTER TABLE ... TRIGGER ALL`),
   and a function or procedure created or replaced `LEAKPROOF` or in an untrusted language (`c`, `internal`, `plpython3u`, ...). Without it,
