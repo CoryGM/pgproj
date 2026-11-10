@@ -6,6 +6,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
 ### Installing
 
 - **Linux builds work with OpenSSL 4**, so pgproj connects to databases on Fedora 45 and later, where 0.2.1 stopped with
