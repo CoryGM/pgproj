@@ -161,7 +161,7 @@ public sealed partial class LiveDatabaseModelLoader
     /// <summary>
     /// What the database has in the scaffolded schemas that pgproj cannot read (a text search parser or template, an operator class or family, a conversion,
     /// a base or shell type),
-    /// and what belongs to no schema and is not read either (a foreign data wrapper, server, or user mapping, a language, a transform, an access method). The system's own
+    /// and what belongs to no schema and is not read either (a language, a transform, an access method; foreign data wrappers, servers, and user mappings are read since G-132). The system's own
     /// (OIDs below 16384) and an extension's are left out.
     /// </summary>
     private static async Task<IReadOnlyList<UnsupportedObject>> ReadUnsupportedObjectsAsync(NpgsqlConnection connection, IReadOnlyList<string> scopeSchemas, CancellationToken cancellationToken)
@@ -205,16 +205,6 @@ public sealed partial class LiveDatabaseModelLoader
             where t.oid >= 16384 and t.typtype = 'p' and not t.typisdefined
               and (@schemas is null or n.nspname = any(@schemas))
               and not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_type'::regclass and d.objid = t.oid and d.deptype = 'e')
-            union all
-            select null, 'Foreign data wrapper', w.fdwname
-            from pg_catalog.pg_foreign_data_wrapper w
-            where not exists (select 1 from pg_catalog.pg_depend d where d.classid = 'pg_catalog.pg_foreign_data_wrapper'::regclass and d.objid = w.oid and d.deptype = 'e')
-            union all
-            select null, 'Foreign server', s.srvname
-            from pg_catalog.pg_foreign_server s
-            union all
-            select null, 'User mapping', m.srvname || ' for ' || m.usename
-            from pg_catalog.pg_user_mappings m
             union all
             select null, 'Language', l.lanname
             from pg_catalog.pg_language l

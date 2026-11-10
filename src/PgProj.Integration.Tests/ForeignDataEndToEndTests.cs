@@ -150,9 +150,18 @@ public sealed class ForeignDataEndToEndTests
                 """);
 
             var scaffoldProject = Path.Combine(scaffoldDirectory, "pgproj.json");
-            var scaffolded = await RunAsync("init", "--project", scaffoldProject, "--source-connection", connectionString);
+            var scaffolded = await RunAsync("init", "--project", scaffoldProject, "--source-connection", connectionString, "--report");
             Assert.AreEqual(0, scaffolded.ExitCode, scaffolded.Output);
             StringAssert.Contains(scaffolded.Output, $"PGPROJ_VAR_{variable}");
+
+            // The report no longer lists what it scaffolds as not supported.
+            var report = File.ReadAllText(Directory.EnumerateFiles(scaffoldDirectory, "init-report-*.md", SearchOption.AllDirectories).Single());
+            var notSupported = report.IndexOf("## Not modeled: not supported", StringComparison.Ordinal) is var start and >= 0 ? report[start..] : string.Empty;
+            notSupported = notSupported.IndexOf("\n## ", 1, StringComparison.Ordinal) is var end and > 0 ? notSupported[..end] : notSupported;
+            foreach (var kind in new[] { "Foreign data wrapper", "Foreign server", "User mapping" })
+            {
+                Assert.IsFalse(notSupported.Contains(kind, StringComparison.Ordinal), notSupported);
+            }
             var all = string.Concat(Directory.EnumerateFiles(scaffoldDirectory, "*.sql", SearchOption.AllDirectories).Select(File.ReadAllText));
             Assert.IsFalse(all.Contains("never-written", StringComparison.Ordinal), "A password is never written.\n" + all);
             var serverFile = File.ReadAllText(Path.Combine(scaffoldDirectory, "sql", "Server", "remote.sql"));

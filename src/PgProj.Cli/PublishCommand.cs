@@ -36,7 +36,7 @@ public static class PublishCommand
                 "materialized view, extension, or composite type field; a changed column type that can lose a value (a widening such as varchar(50) " +
                 "to varchar(100) or int to bigint is not one); a label removed from an enum type that columns use; a field of a composite type that " +
                 "columns use changed to a type that can lose a value; a cast, operator, aggregate, " +
-                "rule, publication, or event trigger that is dropped and not created again; a revoked grant or role membership; " +
+                "rule, publication, event trigger, foreign server, or user mapping that is dropped and not created again; a revoked grant or role membership; " +
                 "or a changed owner. Without this flag, --execute refuses to run such a script and lists the affected operations.",
         };
         var commentsOnlyOption = new Option<bool>("--comments-only")

@@ -18,7 +18,7 @@ public sealed class DestructiveOperationCliTests
         {
             "table", "a foreign table too", "column", "materialized view", "extension", "composite type field", "changed column type that can lose a value", "a widening",
             "label removed from an enum type", "field of a composite type that columns use changed",
-            "cast", "operator", "aggregate", "rule", "publication", "event trigger",
+            "cast", "operator", "aggregate", "rule", "publication", "event trigger", "foreign server", "user mapping",
             "revoked grant or role membership", "changed owner",
         })
         {
