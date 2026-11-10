@@ -23,12 +23,12 @@ rm -rf "$work/rw-tools/pgproj-linux"
 dotnet publish "$repo/src/PgProj.Cli" -c Release -r linux-x64 --self-contained -o "$work/rw-tools/pgproj-linux" > "$work/rw-tools/publish.log" 2>&1 \
   || { echo "the Linux build failed: $work/rw-tools/publish.log" >&2; exit 1; }
 pgproj() { docker run --rm --network "$net" -v "$work:/work" -w /work "$image" /work/rw-tools/pgproj-linux/pgproj "$@"; }
-echo "pgproj: $(pgproj --version 2>&1 | head -1)"
 
 rm -rf "$work/rw-out"
 docker rm -f rwqa90 rwqa91 rwqa92 >/dev/null 2>&1
 docker network rm "$net" >/dev/null 2>&1
 docker network create "$net" >/dev/null
+echo "pgproj: $(pgproj --version 2>&1 | head -1)"
 docker run -d --name rwqa90 --network "$net" -e POSTGRES_PASSWORD=qa pgvector/pgvector:pg18 >/dev/null
 docker run -d --name rwqa91 --network "$net" -e POSTGRES_PASSWORD=qa postgis/postgis:17-3.5 >/dev/null
 for c in rwqa90 rwqa91; do until docker exec $c pg_isready -U postgres >/dev/null 2>&1; do sleep 2; done; done; sleep 5
