@@ -133,6 +133,12 @@ public sealed partial class PgProjEngine
         var project = snapshot.Project;
         var model = built.Model;
 
+        // The direction first, before the source's diagnostics (G-349), the target named by its connection string.
+        if (source is not null)
+        {
+            Say(progress, EngineEventKind.Direction, SourceProject.Direction(source.Source, SourceProject.EndOf(source.TargetConnectionString)));
+        }
+
         if (request.AfterBuild is { } afterBuild)
         {
             await afterBuild(EngineMasking.Build(state.ToBuildResult()), cancellationToken);
@@ -171,7 +177,6 @@ public sealed partial class PgProjEngine
             await source.EnsureNotTheTargetAsync(connection, cancellationToken);
             sourceEnd = source.Source;
             targetEnd = SourceProject.EndOf(connection);
-            Say(progress, EngineEventKind.Direction, SourceProject.Direction(sourceEnd, targetEnd));
         }
 
         await LiveComparison.ApplySearchPathAsync(connection, project, cancellationToken);

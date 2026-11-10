@@ -188,6 +188,14 @@ internal sealed class SourceProject
         return new DatabaseEnd(connection.Database ?? "database", connection.Host ?? string.Empty, connection.Port);
     }
 
+    /// <summary>A database end as its connection string names it, before connecting (G-349): the database, host, and port an open connection would report.</summary>
+    public static DatabaseEnd EndOf(string connectionString)
+    {
+        ArgumentNullException.ThrowIfNull(connectionString);
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        return new DatabaseEnd(string.IsNullOrEmpty(builder.Database) ? "database" : builder.Database, builder.Host ?? string.Empty, builder.Port);
+    }
+
     /// <summary>What the first output line says: which way the change goes.</summary>
     public static string Direction(DatabaseEnd source, DatabaseEnd target) => $"Source {source} -> Target {target}";
 

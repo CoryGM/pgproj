@@ -29,8 +29,8 @@ Three databases on one server (`shop_dev`, `shop_qa`, `shop_prod`), `shop_dev` w
 
 ```
 $ pgproj publish --source-connection "$C;Database=shop_dev" --target-connection "$C;Database=shop_qa" --dry-run --exclude-owners
-No diagnostics.
 Source shop_dev (localhost:5432) -> Target shop_qa (localhost:5432)
+No diagnostics.
 CREATE TABLE "public"."customer" ( ...
 ```
 
