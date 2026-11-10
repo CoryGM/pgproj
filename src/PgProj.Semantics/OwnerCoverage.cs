@@ -130,6 +130,8 @@ public static class OwnerCoverage
 
         count += model.EventTriggers.Values.Count(eventTrigger => !Stated("event trigger", eventTrigger.Key));
         count += model.Publications.Values.Count(publication => !Stated("publication", publication.Key));
+        count += model.ForeignDataWrappers.Values.Count(wrapper => !Stated("foreign data wrapper", wrapper.Key));
+        count += model.ForeignServers.Values.Count(server => !Stated("server", server.Key));
         count += schemas.Count(schema => !Stated("schema", schema));
         return count;
     }

@@ -213,6 +213,26 @@ public sealed partial class ScriptGenerator
             orderedNodeIds = graph.TopologicalSort().Select(node => node.NodeId).ToArray();
         }
 
+        // A server dropped to be created again takes its user mappings with it: they are dropped first and created again after it (G-132).
+        foreach (var rebuilt in modifiedChanges.Where(static change => change.NewNode is ForeignServerDefinition && IsDropAndRecreateObject(change)))
+        {
+            var serverName = ((ForeignServerDefinition)rebuilt.NewNode).Name;
+            foreach (var node in graph.Nodes.Values.Where(node => graph.IsTargetNode(node.NodeId) && node.SemanticNode is UserMappingDefinition mapping && mapping.Server == serverName))
+            {
+                supportReasons[node.NodeId] = $"its server {serverName} is dropped and created again, and its user mappings with it";
+                if (!addedByNodeId.ContainsKey(node.NodeId) && !modifiedByNodeId.ContainsKey(node.NodeId))
+                {
+                    modifiedByNodeId[node.NodeId] = new ModifiedChange
+                    {
+                        NodeId = node.NodeId,
+                        NodeKind = ChangeNodeKind.UserMapping,
+                        OldNode = node.SemanticNode,
+                        NewNode = node.SemanticNode,
+                        Details = [],
+                    };
+                }
+            }
+        }
         bool Recreates(ModifiedChange change) => forcedRebuilds.Contains(change.NodeId) || typeSwaps.ContainsKey(change.NodeId) || supportReasons.ContainsKey(change.NodeId) || IsDropAndRecreate(change, replaceInPlace);
         string? DropReason(string nodeId)
             => forcedRebuilds.Contains(nodeId) ? $"{nodeId} is dropped here and recreated below: {RebuildReason(nodeId)}." : null;
@@ -1041,6 +1061,8 @@ public sealed partial class ScriptGenerator
 
             // A publication is altered in place (ALTER PUBLICATION SET), except that FOR ALL TABLES cannot be altered into or out of, so that change is a drop and a create (G-134).
             ChangeNodeKind.Publication => modified.Details.Any(static detail => detail.PropertyName == nameof(PublicationDefinition.IsAllTables)),
+            // A server's wrapper and TYPE cannot be altered, so changing either is a drop and a create, its user mappings with it; the rest is altered in place (G-132).
+            ChangeNodeKind.ForeignServer => modified.Details.Any(static detail => detail.PropertyName is nameof(ForeignServerDefinition.Wrapper) or nameof(ForeignServerDefinition.ServerType)),
             // An extension is altered in place, never dropped and created again, which would drop every object it installed (G-46, G-213).
             ChangeNodeKind.Type => !(modified.NewNode is TypeDefinition extension && SqlOperation.IsExtension(extension))
                 && !IsChangeOnlyTo<TypeDefinition>(modified, nameof(TypeDefinition.Comment), nameof(TypeDefinition.ColumnComments))

@@ -52,6 +52,7 @@ How to use pgproj beyond one project deployed to one database. The three ways in
 - [Owners](owners.md) — `OWNER TO`, and why an owner the project does not state is not compared
 - [Privileges on types and domains](type-privileges.md) — `GRANT USAGE ON TYPE`, and `REVOKE ... FROM PUBLIC` for PostgreSQL's default
 - [Privileges on functions and procedures](routine-privileges.md) — `REVOKE ... FROM PUBLIC` for PostgreSQL's `EXECUTE`, kept when a routine is recreated
+- [Foreign data wrappers, servers, and user mappings](foreign-data.md) — with secrets as variables, `--apply-secrets`
 - [Privileges on the public schema](public-schema-privileges.md) — `REVOKE USAGE|CREATE ON SCHEMA public FROM PUBLIC` for PostgreSQL's default
 - [Default privileges](default-privileges.md) — `ALTER DEFAULT PRIVILEGES`: what a rule gives or revokes for a new object, and why an older one is left alone
 

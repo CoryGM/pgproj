@@ -457,6 +457,7 @@ sealed class PgProj.Engine.PublishRequest
   PgProj.Core.ProjectSettings Settings
   PgProj.Engine.PublishMode Mode
   System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String] Variables
+  System.Collections.Generic.IReadOnlyList`1[System.String] ApplySecrets
   System.Collections.Generic.IReadOnlyList`1[System.String] Tenants
   System.Func`3[PgProj.Engine.BuildResult,System.Threading.CancellationToken,System.Threading.Tasks.Task] AfterBuild
   System.Func`3[PgProj.Engine.PublishResult,System.Threading.CancellationToken,System.Threading.Tasks.Task] AfterPlan

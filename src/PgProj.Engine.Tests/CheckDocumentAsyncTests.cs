@@ -120,7 +120,8 @@ public sealed class CheckDocumentAsyncTests
             Files = files,
             ProjectFilePath = ProjectFile,
             DocumentPath = path,
-            Text = "CREATE USER MAPPING FOR app SERVER remote OPTIONS (user 'u', password 'hunter2');\n",
+            // ALTER USER MAPPING is still reported, quoting the statement; CREATE USER MAPPING is modeled since G-132.
+            Text = "ALTER USER MAPPING FOR app SERVER remote OPTIONS (SET password 'hunter2');\n",
         });
 
         Assert.IsNotEmpty(check.Diagnostics);

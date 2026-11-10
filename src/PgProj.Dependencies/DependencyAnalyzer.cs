@@ -277,6 +277,23 @@ public sealed class DependencyAnalyzer
                 // TODO: Add deeper function dependency extraction for argument types.
                 break;
 
+            // A server after its wrapper: the project's own, or the extension that installs it (postgres_fdw); a user mapping after its server (G-132).
+            case ForeignServerDefinition server:
+                if (model.ForeignDataWrappers.ContainsKey(ForeignDataKeys.Wrapper(server.Wrapper)))
+                {
+                    dependencyIds.Add(ForeignDataKeys.Wrapper(server.Wrapper));
+                }
+                else if (model.Types.ContainsKey(ExtensionKeys.Create(server.Wrapper)))
+                {
+                    dependencyIds.Add(ExtensionKeys.Create(server.Wrapper));
+                }
+
+                break;
+
+            case UserMappingDefinition mapping:
+                dependencyIds.Add(ForeignDataKeys.Server(mapping.Server));
+                break;
+
             case ProcedureDefinition procedure:
                 AddBodySequenceDependencies(model, procedure.SchemaName, procedure.Language, procedure.RawBody, dependencyIds);
                 AddDeclaredVariableDependencies(model, procedure.SchemaName, procedure.Language, procedure.RawBody, dependencyIds);
@@ -489,6 +506,14 @@ public sealed class DependencyAnalyzer
             foreach (var function in model.Functions.Values.Where(function => InSchema(function.SchemaName)))
             {
                 dependencyIds.Add(function.Key);
+            }
+        }
+        else if (objectKey.StartsWith("foreign data wrapper:", StringComparison.Ordinal) || objectKey.StartsWith("server:", StringComparison.Ordinal))
+        {
+            // A grant on a foreign data wrapper or server comes after it (G-132); the node is keyed as the grant names it.
+            if (model.ForeignDataWrappers.ContainsKey(objectKey) || model.ForeignServers.ContainsKey(objectKey))
+            {
+                dependencyIds.Add(objectKey);
             }
         }
         else if (grant.ObjectName is { } objectName)

@@ -23,6 +23,8 @@ internal static class OwnerStatementReader
         ["OBJECT_DOMAIN"] = "Domain",
         ["OBJECT_EVENT_TRIGGER"] = "EventTrigger",
         ["OBJECT_PUBLICATION"] = "Publication",
+        ["OBJECT_FDW"] = "ForeignDataWrapper",
+        ["OBJECT_FOREIGN_SERVER"] = "ForeignServer",
         ["OBJECT_COLLATION"] = "Collation",
         ["OBJECT_STATISTIC_EXT"] = "Statistics",
         ["OBJECT_TSDICTIONARY"] = "TextSearchDictionary",
@@ -81,7 +83,7 @@ internal static class OwnerStatementReader
         var role = ReadRoleName(newOwner);
         switch (kind)
         {
-            case "Schema" or "EventTrigger" or "Publication":
+            case "Schema" or "EventTrigger" or "Publication" or "ForeignDataWrapper" or "ForeignServer":
                 return ReadString(target) is { } name ? new OwnerNode(kind, null, name, role) : null;
 
             case "Type" or "Domain" or "Collation" or "Statistics" or "TextSearchDictionary" or "TextSearchConfiguration":

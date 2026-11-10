@@ -51,6 +51,17 @@ internal static class GrantSqlBuilder
             return $"{verb} {privileges} ON SCHEMA {FormatQualifiedName(null, objectKey["schema:".Length..])} {direction} {grantee}{grantOption};";
         }
 
+        // A foreign data wrapper or server (G-132).
+        if (objectKey.StartsWith("foreign data wrapper:", StringComparison.Ordinal))
+        {
+            return $"{verb} {privileges} ON FOREIGN DATA WRAPPER {FormatQualifiedName(null, objectKey["foreign data wrapper:".Length..])} {direction} {grantee}{grantOption};";
+        }
+
+        if (objectKey.StartsWith("server:", StringComparison.Ordinal))
+        {
+            return $"{verb} {privileges} ON FOREIGN SERVER {FormatQualifiedName(null, objectKey["server:".Length..])} {direction} {grantee}{grantOption};";
+        }
+
         if (objectKey.StartsWith("all ", StringComparison.OrdinalIgnoreCase) && objectKey.Contains(InSchema, StringComparison.OrdinalIgnoreCase))
         {
             var afterAll = objectKey["all ".Length..];

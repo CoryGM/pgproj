@@ -91,6 +91,52 @@ public static class ScriptVariables
         return new string(characters);
     }
 
+    /// <summary>
+    /// The first character of the literal a variable of a project's SQL stands in as (G-132): <c>:'name'</c> is read as <c>'\u001Fname'</c>, the same length, so it parses
+    /// and keeps its name. Only an option value of a foreign server or user mapping may be one (G-336's designated slots); the parser refuses it anywhere else.
+    /// </summary>
+    public const char SlotMarker = '\u001F';
+
+    /// <summary>
+    /// <paramref name="sql"/> with each <c>:'name'</c> replaced by <c>'\u001Fname'</c> (<see cref="SlotMarker"/>), so a project's SQL that names a value with a variable
+    /// parses, every position stays the author's, and the name can be read back from the literal (G-132). <c>:"name"</c> is left as it is.
+    /// </summary>
+    public static string MarkSlots(string sql)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        // The lexer runs only for text that may hold one: a cast (::) is not one.
+        if (!sql.Contains(":'", StringComparison.Ordinal))
+        {
+            return sql;
+        }
+
+        var uses = Find(sql).Where(static use => use.Quote == '\'').ToArray();
+        if (uses.Length == 0)
+        {
+            return sql;
+        }
+
+        var characters = sql.ToCharArray();
+        foreach (var use in uses)
+        {
+            characters[use.Start] = '\'';
+            characters[use.Start + 1] = SlotMarker;
+            for (var index = 0; index < use.Name.Length; index++)
+            {
+                characters[use.Start + 2 + index] = use.Name[index];
+            }
+
+            characters[use.End - 1] = '\'';
+        }
+
+        return new string(characters);
+    }
+
+    /// <summary>The variable a marked literal stands for (<see cref="MarkSlots"/>), or null when <paramref name="value"/> is a plain value.</summary>
+    public static string? SlotVariable(string? value)
+        => value is { Length: > 1 } && value[0] == SlotMarker ? value[1..] : null;
+
     /// <summary>One use of a variable: where it starts (its <c>:</c>) and ends, its quote, and its name.</summary>
     private readonly record struct Use(int Start, int End, char Quote, string Name);
 

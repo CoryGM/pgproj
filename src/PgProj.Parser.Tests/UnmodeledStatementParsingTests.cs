@@ -12,7 +12,7 @@ namespace PgProj.Parser.Tests;
 public sealed class UnmodeledStatementParsingTests
 {
     [TestMethod]
-    [DataRow("CREATE FOREIGN DATA WRAPPER w;", "CREATE FOREIGN DATA WRAPPER")]
+    [DataRow("CREATE CONVERSION c FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;", "CREATE CONVERSION")] // a wrapper was the example until G-132 modeled it
     [DataRow("CREATE COLLATION public.c FROM \"C\";", "CREATE COLLATION ... FROM")]
     [DataRow("CREATE ROLE r;", "CREATE ROLE")]
     [DataRow("ALTER STATISTICS public.st SET STATISTICS 100;", "ALTER STATISTICS")]
@@ -171,7 +171,7 @@ public sealed class UnmodeledStatementParsingTests
     [TestMethod]
     public void AnUnmodeledStatementLeavesTheStatementsAroundItAlone()
     {
-        var tree = Parse("CREATE TABLE public.a (x int); CREATE FOREIGN DATA WRAPPER wrap; CREATE TABLE public.b (y int);");
+        var tree = Parse("CREATE TABLE public.a (x int); CREATE CONVERSION c FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8; CREATE TABLE public.b (y int);");
 
         CollectionAssert.AreEqual(new[] { "a", "b" }, tree.Nodes.OfType<TableNode>().Select(static table => table.Name).ToArray());
         Assert.HasCount(1, tree.Diagnostics);

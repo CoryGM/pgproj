@@ -161,7 +161,7 @@ is fine ([`pgproj.json.md`](../pgproj.json.md#transactions)).
 ### ... is not modeled; the statement is ignored
 
 ```text
-sql/a.sql:2:1-2:55: [Warning] CREATE SERVER is not modeled; the statement is ignored: CREATE SERVER remote FOREIGN DATA WRAPPER postgres_fdw
+sql/a.sql:2:1-2:79: [Warning] CREATE CONVERSION is not modeled; the statement is ignored: CREATE CONVERSION latin1_to_utf8 FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8
 ```
 
 pgproj does not model that kind of statement, so `publish` will never deploy it. If the database needs it, move it to a `predeploy` or `postdeploy`

@@ -210,7 +210,8 @@ public sealed partial class PgProjEngine
             serverMajor,
             concurrently ? await PublishTexts.ReadRelationNamesAsync(connection, cancellationToken) : null,
             commentsOnly ? [] : await SuperuserStatements.ReadUntrustedLanguagesAsync(connection, cancellationToken),
-            progress);
+            progress,
+            commentsOnly ? null : request.ApplySecrets);
 
         // What a printed or written script needs to bound its waits the same way (G-270); --execute sets it for its own transaction.
         var written = lockTimeout is null ? unit.Script : $"SET lock_timeout = '{lockTimeout}';{Environment.NewLine}{Environment.NewLine}{unit.Script}";

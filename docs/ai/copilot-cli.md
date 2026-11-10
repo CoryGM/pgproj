@@ -59,6 +59,7 @@ Copilot must preserve:
   `NOT VALID` (a foreign key on a partitioned table only from PostgreSQL 18); a failed step has what it built dropped, is named, and exits `1`; a printed or written
   script puts these below the line `-- pgproj --concurrently: ...`; not with `--comments-only`; no `pgproj.json` setting — G-271, design approved with corrections
   by the user 2026-10-14. Also: an `INVALID` index is read (`diff` reports `Valid`), rebuilt by `publish`, and left out by `init` with a warning)
+- --apply-secrets [names] (`publish`: send the secrets of user mappings that exist again, every variable their options name or only those listed, as `ALTER USER MAPPING ... OPTIONS (SET|ADD ...)`; a secret is otherwise sent only on create; `PublishRequest.ApplySecrets` — G-132, G-336's rotation option (c), the user's design of 2026-11-10)
 - --allow-lock-limit (`publish`: let `--execute` run a script estimated to need more locks than the server's lock table holds, `max_locks_per_transaction *
   (max_connections + max_prepared_transactions)`; without it `--execute` refuses such a script before anything runs; from 80% of it `publish` warns; `--dry-run`
   and `--output` only warn; per run, no `pgproj.json` setting - G-280, option (b), the user's decision of 2026-10-13, details 2026-10-14)

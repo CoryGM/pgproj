@@ -39,6 +39,9 @@ public sealed class DiffEngine
         var dictionaryDiff = DiffTextSearchDictionaries(oldModel, newModel);
         var configurationDiff = DiffTextSearchConfigurations(oldModel, newModel);
         var publicationDiff = DiffPublications(oldModel, newModel);
+        var wrapperDiff = DiffModelNodes(oldModel.ForeignDataWrappers, newModel.ForeignDataWrappers, "DiffForeignDataWrappers", BuildForeignDataWrapperModificationDetails);
+        var serverDiff = DiffModelNodes(oldModel.ForeignServers, newModel.ForeignServers, "DiffForeignServers", BuildForeignServerModificationDetails);
+        var mappingDiff = DiffModelNodes(oldModel.UserMappings, ForConnectedRole(newModel.UserMappings, oldModel.ConnectedRole), "DiffUserMappings", BuildUserMappingModificationDetails);
         var ownerDiff = DiffOwners(oldModel, newModel);
         var schemaDiff = DiffSchemaDefinitions(oldModel, newModel);
 
@@ -107,6 +110,15 @@ public sealed class DiffEngine
             AddedPublications = publicationDiff.Added,
             RemovedPublications = publicationDiff.Removed,
             ModifiedPublications = publicationDiff.Modified,
+            AddedForeignDataWrappers = wrapperDiff.Added,
+            RemovedForeignDataWrappers = wrapperDiff.Removed,
+            ModifiedForeignDataWrappers = wrapperDiff.Modified,
+            AddedForeignServers = serverDiff.Added,
+            RemovedForeignServers = serverDiff.Removed,
+            ModifiedForeignServers = serverDiff.Modified,
+            AddedUserMappings = mappingDiff.Added,
+            RemovedUserMappings = mappingDiff.Removed,
+            ModifiedUserMappings = mappingDiff.Modified,
             AddedOwners = ownerDiff.Added,
             RemovedOwners = [],
             ModifiedOwners = ownerDiff.Modified,
@@ -200,6 +212,15 @@ public sealed class DiffEngine
         AddChanges(result.AddedPublications, added);
         AddChanges(result.RemovedPublications, removed);
         AddChanges(result.ModifiedPublications, modified);
+        AddChanges(result.AddedForeignDataWrappers, added);
+        AddChanges(result.RemovedForeignDataWrappers, removed);
+        AddChanges(result.ModifiedForeignDataWrappers, modified);
+        AddChanges(result.AddedForeignServers, added);
+        AddChanges(result.RemovedForeignServers, removed);
+        AddChanges(result.ModifiedForeignServers, modified);
+        AddChanges(result.AddedUserMappings, added);
+        AddChanges(result.RemovedUserMappings, removed);
+        AddChanges(result.ModifiedUserMappings, modified);
         AddChanges(result.AddedOwners, added);
         AddChanges(result.ModifiedOwners, modified);
         AddChanges(result.AddedSchemaDefinitions, added);
@@ -1764,6 +1785,63 @@ public sealed class DiffEngine
     /// What differs between two publications of one name (G-134): whether it is <c>FOR ALL TABLES</c>, each option in comparison form (the operations it publishes as a
     /// set, PostgreSQL's defaults left out), the schemas it names, and the tables it names, each with its column list (a set) and its row filter (in comparison form).
     /// </summary>
+    /// <summary>
+    /// A project's user mappings by the key the database gives them (G-132): <c>FOR CURRENT_USER</c> is stored as the role that runs it, which is the role the live model
+    /// was read as. The definitions are unchanged, so the script still writes <c>CURRENT_USER</c>, as the project does.
+    /// </summary>
+    private static IReadOnlyDictionary<string, UserMappingDefinition> ForConnectedRole(IReadOnlyDictionary<string, UserMappingDefinition> mappings, string? connectedRole)
+        => connectedRole is null || !mappings.Values.Any(static mapping => mapping.Role == PgProj.Parser.UserMappingNode.CurrentUser)
+            ? mappings
+            : mappings.Values.ToDictionary(
+                mapping => mapping.Role == PgProj.Parser.UserMappingNode.CurrentUser ? ForeignDataKeys.UserMapping(connectedRole, mapping.Server) : mapping.Key,
+                PgProj.Parser.SqlIdentifiers.NameComparer);
+
+    private static void AddForeignOptionDifference(List<ModificationDetail> details, IReadOnlyList<ForeignOptionDefinition> oldOptions, IReadOnlyList<ForeignOptionDefinition> newOptions)
+    {
+        // Compared by name; a value given by a variable, or a password, only by whether it is there (G-132, item 5 and 6), and never shown.
+        if (ForeignOptions.Differences(oldOptions, newOptions).Count > 0)
+        {
+            AddValueDifference(details, "Options", string.Join(", ", ForeignOptions.Describe(oldOptions)), string.Join(", ", ForeignOptions.Describe(newOptions)), StringComparison.Ordinal);
+        }
+    }
+
+    private List<ModificationDetail> BuildForeignDataWrapperModificationDetails(ForeignDataWrapperDefinition oldWrapper, ForeignDataWrapperDefinition newWrapper)
+    {
+        var details = new List<ModificationDetail>();
+        AddValueDifference(details, nameof(ForeignDataWrapperDefinition.Handler), oldWrapper.Handler, newWrapper.Handler, StringComparison.Ordinal);
+        AddValueDifference(details, nameof(ForeignDataWrapperDefinition.Validator), oldWrapper.Validator, newWrapper.Validator, StringComparison.Ordinal);
+        AddForeignOptionDifference(details, oldWrapper.Options, newWrapper.Options);
+        AddValueDifference(details, nameof(ForeignDataWrapperDefinition.Comment), oldWrapper.Comment, newWrapper.Comment, StringComparison.Ordinal);
+        return details;
+    }
+
+    private List<ModificationDetail> BuildForeignServerModificationDetails(ForeignServerDefinition oldServer, ForeignServerDefinition newServer)
+    {
+        var details = new List<ModificationDetail>();
+        AddValueDifference(details, nameof(ForeignServerDefinition.Wrapper), oldServer.Wrapper, newServer.Wrapper, StringComparison.Ordinal);
+        AddValueDifference(details, nameof(ForeignServerDefinition.ServerType), oldServer.ServerType, newServer.ServerType, StringComparison.Ordinal);
+        // Compared only when the project states one: ALTER SERVER sets a VERSION but cannot take one away.
+        if (newServer.Version is not null)
+        {
+            AddValueDifference(details, nameof(ForeignServerDefinition.Version), oldServer.Version, newServer.Version, StringComparison.Ordinal);
+        }
+        AddForeignOptionDifference(details, oldServer.Options, newServer.Options);
+        AddValueDifference(details, nameof(ForeignServerDefinition.Comment), oldServer.Comment, newServer.Comment, StringComparison.Ordinal);
+        return details;
+    }
+
+    private List<ModificationDetail> BuildUserMappingModificationDetails(UserMappingDefinition oldMapping, UserMappingDefinition newMapping)
+    {
+        // Options the role pgproj connects as cannot read are not compared (item 4).
+        var details = new List<ModificationDetail>();
+        if (!oldMapping.OptionsUnreadable && !newMapping.OptionsUnreadable)
+        {
+            AddForeignOptionDifference(details, oldMapping.Options, newMapping.Options);
+        }
+
+        return details;
+    }
+
     private List<ModificationDetail> BuildPublicationModificationDetails(PublicationDefinition oldPublication, PublicationDefinition newPublication)
     {
         var details = new List<ModificationDetail>();

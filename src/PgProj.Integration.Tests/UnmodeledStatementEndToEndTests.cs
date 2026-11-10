@@ -8,6 +8,7 @@ namespace PgProj.Integration.Tests;
 /// G-106 against a real server: a statement pgproj does not model is reported by <c>build</c> and <c>publish</c>, which still
 /// succeed, and is not run. Before, the same project built with "No diagnostics." and its text search template, rule, and seed row were
 /// silently missing after a publish.
+/// A foreign data wrapper and server were its examples until G-132 modeled them; a conversion and an ALTER SERVER with a password, still reported, replace them.
 /// </summary>
 [TestClass]
 public sealed class UnmodeledStatementEndToEndTests
@@ -18,9 +19,9 @@ public sealed class UnmodeledStatementEndToEndTests
         CREATE TEXT SEARCH TEMPLATE public.g106_ts
             (INIT = a, LEXIZE = b);
 
-        CREATE FOREIGN DATA WRAPPER g106_fdw;
+        CREATE CONVERSION g106_conv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;
 
-        CREATE SERVER s FOREIGN DATA WRAPPER g106_fdw OPTIONS (password 'g142secret');
+        ALTER SERVER g106_s OPTIONS (ADD password 'g142secret');
 
         INSERT INTO public.t VALUES (1);
         """;
@@ -43,9 +44,9 @@ public sealed class UnmodeledStatementEndToEndTests
             var built = await RunAsync("build", "--project", projectFile);
             Assert.AreEqual(0, built.ExitCode, built.Output);
             StringAssert.Contains(built.Output, "schema.sql:3:1-4:27: [Warning] CREATE TEXT SEARCH TEMPLATE is not modeled; the statement is ignored: CREATE TEXT SEARCH TEMPLATE public.g106_ts (INIT = a, LEXIZE = b)");
-            StringAssert.Contains(built.Output, "schema.sql:6:1-6:37: [Warning] CREATE FOREIGN DATA WRAPPER is not modeled; the statement is ignored: CREATE FOREIGN DATA WRAPPER g106_fdw");
+            StringAssert.Contains(built.Output, "schema.sql:6:1-6:74: [Warning] CREATE CONVERSION is not modeled; the statement is ignored: CREATE CONVERSION g106_conv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8");
             StringAssert.Contains(built.Output, "schema.sql:10:1-10:32: [Warning] INSERT is not modeled; the statement is ignored (to run it on every publish, put it in the predeploy or postdeploy script): INSERT INTO public.t VALUES (1)");
-            StringAssert.Contains(built.Output, "schema.sql:8:1-8:78: [Warning] CREATE SERVER is not modeled; the statement is ignored: CREATE SERVER s FOREIGN DATA WRAPPER g106_fdw OPTIONS (password '*****')");
+            StringAssert.Contains(built.Output, "schema.sql:8:1-8:56: [Warning] ALTER SERVER is not modeled; the statement is ignored: ALTER SERVER g106_s OPTIONS (ADD password '*****')");
             Assert.DoesNotContain("g142secret", built.Output, StringComparison.Ordinal);
 
             var published = await RunAsync("publish", "--project", projectFile, "--target-connection", connectionString, "--execute");
@@ -55,7 +56,7 @@ public sealed class UnmodeledStatementEndToEndTests
 
             Assert.AreEqual(0L, await ScalarAsync(connectionString, "SELECT count(*) FROM public.t;"));
             Assert.AreEqual(0L, await ScalarAsync(connectionString, "SELECT count(*) FROM pg_ts_template WHERE tmplname = 'g106_ts';"));
-            Assert.AreEqual(0L, await ScalarAsync(connectionString, "SELECT count(*) FROM pg_foreign_data_wrapper WHERE fdwname = 'g106_fdw';"));
+            Assert.AreEqual(0L, await ScalarAsync(connectionString, "SELECT count(*) FROM pg_conversion WHERE conname = 'g106_conv';"));
 
             var diffed = await RunAsync("diff", "--project", projectFile, "--target-connection", connectionString);
             Assert.AreEqual(0, diffed.ExitCode, diffed.Output);

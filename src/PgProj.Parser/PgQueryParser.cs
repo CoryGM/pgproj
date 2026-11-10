@@ -26,7 +26,10 @@ public sealed partial class PgQueryParser
     public SqlSyntaxTree Parse(string sql)
     {
         ArgumentNullException.ThrowIfNull(sql);
-        return LargeStack.Run(() => ParseOnLargeStack(sql));
+
+        // A variable, :'name', parses as a literal that keeps its name (G-132); only a foreign server's or user mapping's option value may be one.
+        var marked = ScriptVariables.MarkSlots(sql);
+        return LargeStack.Run(() => ParseOnLargeStack(marked));
     }
 
     private SqlSyntaxTree ParseOnLargeStack(string sql)
@@ -264,6 +267,7 @@ public sealed partial class PgQueryParser
                     if (TryGetDirectProperty(statement, "stmt", out var modeledBody))
                     {
                         ReportUnreadClauses(sql, statement, modeledBody, diagnostics);
+                        ReportMisplacedVariables(sql, statement, modeledBody, diagnostics);
                     }
 
                     var statementSql = GetStatementSql(sql, statement);
@@ -717,6 +721,15 @@ public sealed partial class PgQueryParser
                         case "CreateRangeStmt":
                             AddIfNotNull(nodes, TypeStatementReader.ReadRangeType(property.Value, statementSql));
                             break;
+                        case "CreateFdwStmt":
+                            AddIfNotNull(nodes, TryCreateForeignDataWrapperNode(property.Value));
+                            continue;
+                        case "CreateForeignServerStmt":
+                            AddIfNotNull(nodes, TryCreateForeignServerNode(property.Value));
+                            continue;
+                        case "CreateUserMappingStmt":
+                            AddIfNotNull(nodes, TryCreateUserMappingNode(property.Value));
+                            continue;
                         case "DefineStmt":
                             AddIfNotNull(nodes, TypeStatementReader.ReadBaseType(property.Value, statementSql));
                             if (string.Equals(TryGetDirectStringProperty(property.Value, "kind"), "OBJECT_OPERATOR", StringComparison.Ordinal)

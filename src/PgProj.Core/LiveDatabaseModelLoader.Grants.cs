@@ -25,6 +25,7 @@ public sealed partial class LiveDatabaseModelLoader
         grants.AddRange(await ReadTypeGrantsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadRoutineRevokedDefaultsAsync(connection, scopeSchemas, cancellationToken));
         grants.AddRange(await ReadDefaultPrivilegeRevokedDefaultsAsync(connection, cancellationToken));
+        grants.AddRange(await ReadForeignDataGrantsAsync(connection, cancellationToken));
         grants.AddRange(await ReadRoleMembershipsAsync(connection, cancellationToken));
         return grants;
     }

@@ -31,6 +31,9 @@ public sealed record DatabaseModel
         TextSearchDictionaries = new Dictionary<string, TextSearchDictionaryDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
         TextSearchConfigurations = new Dictionary<string, TextSearchConfigurationDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
         Publications = new Dictionary<string, PublicationDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
+        ForeignDataWrappers = new Dictionary<string, ForeignDataWrapperDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
+        ForeignServers = new Dictionary<string, ForeignServerDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
+        UserMappings = new Dictionary<string, UserMappingDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
         Owners = new Dictionary<string, OwnerDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
         SchemaDefinitions = new Dictionary<string, SchemaDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer),
         Diagnostics = [],
@@ -99,6 +102,18 @@ public sealed record DatabaseModel
     /// <summary>The database's publications, by <see cref="PublicationOptions.CreateKey"/> (G-134).</summary>
     public IReadOnlyDictionary<string, PublicationDefinition> Publications { get; set; }
         = new Dictionary<string, PublicationDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+
+    /// <summary>The database's own foreign data wrappers, by <see cref="ForeignDataKeys.Wrapper"/> (G-132): not an extension's.</summary>
+    public IReadOnlyDictionary<string, ForeignDataWrapperDefinition> ForeignDataWrappers { get; set; }
+        = new Dictionary<string, ForeignDataWrapperDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+
+    /// <summary>The database's foreign servers, by <see cref="ForeignDataKeys.Server"/> (G-132).</summary>
+    public IReadOnlyDictionary<string, ForeignServerDefinition> ForeignServers { get; set; }
+        = new Dictionary<string, ForeignServerDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+
+    /// <summary>The database's user mappings, by <see cref="ForeignDataKeys.UserMapping"/> (G-132).</summary>
+    public IReadOnlyDictionary<string, UserMappingDefinition> UserMappings { get; set; }
+        = new Dictionary<string, UserMappingDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
 
     /// <summary>The owners the model states for objects, by <see cref="OwnerKeys.Create"/> (G-146). A live model has one for every object it reads; a project has the ones it states.</summary>
     public IReadOnlyDictionary<string, OwnerDefinition> Owners { get; set; }
@@ -428,6 +443,11 @@ public sealed record DatabaseModel
         foreach (var publication in Publications.Values)
         {
             yield return publication;
+        }
+
+        foreach (var foreignNode in ForeignDataWrappers.Values.Cast<ISemanticNode>().Concat(ForeignServers.Values).Concat(UserMappings.Values))
+        {
+            yield return foreignNode;
         }
 
         foreach (var owner in Owners.Values)

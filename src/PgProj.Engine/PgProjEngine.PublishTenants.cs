@@ -61,7 +61,7 @@ public sealed partial class PgProjEngine
             connection, sharedModel, sharedScope, grants, memberships, (request.ExcludeOwners ?? project.ExcludeOwners) || sharedModel.Owners.Count == 0, LiveComparison.GetScopeExtensions(sharedModel), cancellationToken);
         var shared = PublishUnit.Build(
             project, SharedLabel, sharedModel, sharedLive, sharedChanges, DeployScripts.ForProject(project, sharedChanges), searchPath: null,
-            commentsOnly, concurrently, serverMajor, relationNames, untrustedLanguages, progress);
+            commentsOnly, concurrently, serverMajor, relationNames, untrustedLanguages, progress, commentsOnly ? null : request.ApplySecrets);
 
         var previousSearchPath = await TenantComparison.ReadSearchPathAsync(connection, cancellationToken);
         try

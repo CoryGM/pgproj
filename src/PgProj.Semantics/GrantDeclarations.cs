@@ -66,7 +66,7 @@ internal static class GrantDeclarations
         };
     }
 
-    private static readonly string[] ObjectKinds = ["schema", "table", "sequence", "function", "procedure", "type", "domain"];
+    private static readonly string[] ObjectKinds = ["schema", "table", "sequence", "function", "procedure", "type", "domain", "fdw", "foreign server"];
 
     /// <summary>
     /// <c>REVOKE ... FROM PUBLIC</c> of a privilege PostgreSQL gives <c>PUBLIC</c> by default, read as "without the default": one <see
@@ -230,6 +230,13 @@ internal static class GrantDeclarations
                 case "sequence":
                     objectName = target.Name;
                     objectKey = $"{node.ObjectKind}:{DatabaseModel.CreateKey(schemaName, target.Name)}";
+                    break;
+                case "fdw":
+                case "foreign server":
+                    // A foreign data wrapper or server (G-132): no schema, its key is its node's.
+                    schemaName = null;
+                    objectName = target.Name;
+                    objectKey = node.ObjectKind == "fdw" ? ForeignDataKeys.Wrapper(target.Name) : ForeignDataKeys.Server(target.Name);
                     break;
                 case "type":
                 case "domain":

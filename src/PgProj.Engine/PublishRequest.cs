@@ -80,6 +80,13 @@ public sealed record PublishRequest
     /// </summary>
     public IReadOnlyDictionary<string, string> Variables { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Sends a secret again to the user mappings that already exist (G-132, G-336's rotation option (c), the CLI's <c>--apply-secrets</c>): null sends none, as
+    /// a secret is sent only when its mapping is created; empty sends every variable the project's mappings name; otherwise only those named. Each is an
+    /// <c>ALTER USER MAPPING ... OPTIONS (SET|ADD ...)</c> in the transaction, filled in, as every variable, only by <see cref="PublishMode.Execute"/>.
+    /// </summary>
+    public IReadOnlyList<string>? ApplySecrets { get; init; }
+
     /// <summary>Told about the run as it goes, on the thread that runs it, in order.</summary>
     public IProgress<EngineEvent>? Progress { get; init; }
 

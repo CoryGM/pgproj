@@ -241,6 +241,11 @@ public static class GrantExpansion
         {
             yield return (objectKey, MembershipPrivileges);
         }
+        else if (objectKey.StartsWith("foreign data wrapper:", StringComparison.Ordinal) || objectKey.StartsWith("server:", StringComparison.Ordinal))
+        {
+            // A foreign data wrapper or server has one privilege, USAGE (G-132).
+            yield return (objectKey, TypePrivileges);
+        }
         else if (objectKey.StartsWith("table:", StringComparison.OrdinalIgnoreCase) && grant.ObjectName is { } tableName)
         {
             if (grant.Columns.Count == 0)

@@ -99,7 +99,7 @@ Not read by pgproj, so absent from the scaffolded project even if the database h
   - roles and their settings (role memberships are scaffolded)
   - text search parsers and templates (a text search configuration and a dictionary are scaffolded)
   - tablespaces (a table's TABLESPACE clause is scaffolded)
-  - foreign data wrappers, servers, user mappings, and foreign tables
+  - foreign tables (foreign data wrappers, servers, and user mappings are scaffolded)
   - subscriptions
   - operator classes and families
   - conversions
@@ -131,8 +131,8 @@ Markdown, not SQL, so `build` ignores it. It starts with a contents list and has
 - **Modeled objects** - a table per schema, by type then name, with the file each object is in. Indexes, constraints, triggers,
   policies, rules, and extended statistics are listed too; grants, owners, and comments are not (they are in their object's file).
 - **Not modeled: not supported** - the kinds pgproj cannot read, and the objects of those kinds it found: in the scaffolded schemas (a
-  foreign table, a text search parser or template, an operator class or family, a conversion, a base or shell type) and in the database (a foreign data
-  wrapper, server, or user mapping, a language, a transform, an access method).
+  foreign table, a text search parser or template, an operator class or family, a conversion, a shell type) and in the database (a language, a transform,
+  an access method).
 - **Not modeled: excluded** - the schemas left out and the files that refer to them, and how many grants, memberships, or owners each
   `--exclude-*` option left out. References are found by looking for `schema.` in the SQL, and PostgreSQL writes names in `public`
   without the schema, so a reference into an excluded `public` is not found.
@@ -300,6 +300,9 @@ Options:
   a function or procedure created or replaced `LEAKPROOF` or in an untrusted language (`c`, `internal`, `plpython3u`, ...), and a base type or its shell created, or its options changed with `ALTER TYPE ... SET`. Without it,
   `--execute` refuses such a script, even for a superuser; with it, a role that is not a superuser is refused before anything runs (see
   [Statements only a superuser can run](notes/superuser-statements.md)).
+- `--apply-secrets [names]` - send the secrets of user mappings that already exist again, for a password that changed in `PGPROJ_VAR_<name>`: every variable the
+  project's user mappings name, or only those listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is
+  created. Each is an `ALTER USER MAPPING ... OPTIONS (SET password :'name')` in the script, filled in only by `--execute` ([foreign data](notes/foreign-data.md)).
 - `--allow-lock-limit` - let `--execute` run a script estimated to need more locks than the server's lock table holds
   (`max_locks_per_transaction * (max_connections + max_prepared_transactions)`). Without it, `--execute` refuses such a script; from 80% of the table,
   `publish` warns.

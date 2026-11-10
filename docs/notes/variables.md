@@ -58,6 +58,7 @@ PostgreSQL 15 and later a role granted `SET` on that parameter; it does not keep
 
 ## What is not done yet
 
-Variables are only for the deploy scripts. The objects that hold a secret themselves (a role's password, a user mapping's options, a subscription's
-connection) are not modeled; when one is, it will use the same `:'name'` and `PGPROJ_VAR_<name>`. A changed value is not a difference `diff` can see:
-pgproj sends a value each time the script runs, as the script says.
+Variables are for the deploy scripts, and for the options of a foreign server or user mapping, which send a secret when the mapping is created and with
+`--apply-secrets` ([foreign data](foreign-data.md)). The other objects that hold a secret (a role's password, a subscription's connection) are not modeled;
+when one is, it will use the same `:'name'` and `PGPROJ_VAR_<name>`. A changed value is not a difference `diff` can see: a deploy script sends its value each
+time it runs.

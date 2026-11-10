@@ -66,6 +66,13 @@ public sealed partial class LiveDatabaseModelLoader
             select 'publication', null, p.pubname, '', null, null, pg_catalog.pg_get_userbyid(p.pubowner)
             from pg_catalog.pg_publication p
             union all
+            -- Foreign data wrappers and servers (G-132).
+            select 'foreign data wrapper', null, w.fdwname, '', null, null, pg_catalog.pg_get_userbyid(w.fdwowner)
+            from pg_catalog.pg_foreign_data_wrapper w
+            union all
+            select 'server', null, s.srvname, '', null, null, pg_catalog.pg_get_userbyid(s.srvowner)
+            from pg_catalog.pg_foreign_server s
+            union all
             select 'collation', n.nspname, c.collname, '', null, null, pg_catalog.pg_get_userbyid(c.collowner)
             from pg_catalog.pg_collation c
             inner join pg_catalog.pg_namespace n on n.oid = c.collnamespace
@@ -123,9 +130,12 @@ public sealed partial class LiveDatabaseModelLoader
         IReadOnlyList<LivePublicationSnapshot> publications,
         IReadOnlyList<LiveCollationSnapshot>? collations = null,
         IReadOnlyList<LiveStatisticsSnapshot>? statistics = null,
-        LiveTextSearchSnapshot? textSearch = null)
+        LiveTextSearchSnapshot? textSearch = null,
+        LiveForeignDataSnapshot? foreignData = null)
     {
         textSearch ??= LiveTextSearchSnapshot.Empty;
+        var wrapperNames = (foreignData ?? LiveForeignDataSnapshot.Empty).Wrappers.Select(static wrapper => wrapper.Name).ToHashSet(StringComparer.Ordinal);
+        var serverNames = (foreignData ?? LiveForeignDataSnapshot.Empty).Servers.Select(static server => server.Name).ToHashSet(StringComparer.Ordinal);
         var schemaNames = schemas.Select(static schema => schema.SchemaName).ToHashSet(StringComparer.Ordinal);
         var tableNames = tables.Select(static table => (table.SchemaName, table.TableName)).ToHashSet();
         var viewNames = views.Select(static view => (view.SchemaName, view.ViewName)).ToHashSet();
@@ -164,6 +174,8 @@ public sealed partial class LiveDatabaseModelLoader
                     => $"ALTER OPERATOR {QualifyOperator(schema, row.Name)} ({row.LeftType ?? "NONE"}, {row.RightType ?? "NONE"}) OWNER TO {RenderIdentifier(row.Owner)};",
                 "event trigger" when eventTriggerNames.Contains(row.Name) => $"ALTER EVENT TRIGGER {RenderIdentifier(row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",
                 "publication" when publicationNames.Contains(row.Name) => $"ALTER PUBLICATION {RenderIdentifier(row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",
+                "foreign data wrapper" when wrapperNames.Contains(row.Name) => $"ALTER FOREIGN DATA WRAPPER {RenderIdentifier(row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",
+                "server" when serverNames.Contains(row.Name) => $"ALTER SERVER {RenderIdentifier(row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",
                 "collation" when collationNames.Contains((schema, row.Name)) => $"ALTER COLLATION {QualifyIdentifier(schema, row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",
                 "statistics" when statisticsNames.Contains((schema, row.Name)) => $"ALTER STATISTICS {QualifyIdentifier(schema, row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",
                 "text search dictionary" when dictionaryNames.Contains((schema, row.Name)) => $"ALTER TEXT SEARCH DICTIONARY {QualifyIdentifier(schema, row.Name)} OWNER TO {RenderIdentifier(row.Owner)};",

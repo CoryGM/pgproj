@@ -55,6 +55,10 @@ internal static class UnmodeledStatementReader
         "CreateDomainStmt",
         "CreateExtensionStmt",
         "TransactionStmt",
+        // Foreign data wrappers, servers, and user mappings (G-132); their ALTER forms are still reported: a project states each one's final form.
+        "CreateFdwStmt",
+        "CreateForeignServerStmt",
+        "CreateUserMappingStmt",
     };
 
     /// <summary>The object kinds a <c>COMMENT ON</c> is read for (<c>PgQueryParser.TryCreateObjectCommentNode</c>).</summary>
@@ -79,6 +83,8 @@ internal static class UnmodeledStatementReader
         "OBJECT_TSDICTIONARY",
         "OBJECT_TSCONFIGURATION",
         "OBJECT_EXTENSION",
+        "OBJECT_FDW",
+        "OBJECT_FOREIGN_SERVER",
     };
 
     /// <summary>Statements that change data or run code: pgproj never runs them, but a pre- or post-deploy script can.</summary>
@@ -102,11 +108,8 @@ internal static class UnmodeledStatementReader
     {
         ["CreateSubscriptionStmt"] = "CREATE SUBSCRIPTION",
         ["AlterSubscriptionStmt"] = "ALTER SUBSCRIPTION",
-        ["CreateFdwStmt"] = "CREATE FOREIGN DATA WRAPPER",
         ["AlterFdwStmt"] = "ALTER FOREIGN DATA WRAPPER",
-        ["CreateForeignServerStmt"] = "CREATE SERVER",
         ["AlterForeignServerStmt"] = "ALTER SERVER",
-        ["CreateUserMappingStmt"] = "CREATE USER MAPPING",
         ["AlterUserMappingStmt"] = "ALTER USER MAPPING",
         ["CreateForeignTableStmt"] = "CREATE FOREIGN TABLE",
         ["ImportForeignSchemaStmt"] = "IMPORT FOREIGN SCHEMA",

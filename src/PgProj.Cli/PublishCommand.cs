@@ -51,6 +51,13 @@ public static class PublishCommand
                 "created or replaced LEAKPROOF or in an untrusted language (c, internal, plpython3u, ...), and a base type or its shell created, or its options changed with ALTER TYPE ... SET. It is consent for this run, not a role switch: without it, --execute " +
                 "refuses such a script even for a superuser and lists the statements; with it, a role that is not a superuser is refused before anything runs.",
         };
+        var applySecretsOption = new Option<string[]>("--apply-secrets")
+        {
+            HelpName = "names",
+            Description = "Send the secrets of user mappings that already exist again, for a password that changed in PGPROJ_VAR_<name>: every variable the project's user mappings name, or only the variables listed (a comma-separated list or the option repeated). A secret is otherwise sent only when its mapping is created. Each is an ALTER USER MAPPING ... OPTIONS (SET password :'name') in the script, which only --execute fills in.",
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = true,
+        };
         var allowLockLimitOption = new Option<bool>(LockCapacity.OptionName)
         {
             Description = "Allow --execute to run a script estimated to need more locks than the server's lock table holds (max_locks_per_transaction * " +
@@ -157,6 +164,7 @@ public static class PublishCommand
         command.Options.Add(commentsOnlyOption);
         command.Options.Add(allowSuperuserStatementsOption);
         command.Options.Add(allowLockLimitOption);
+        command.Options.Add(applySecretsOption);
         command.Options.Add(lockTimeoutOption);
         command.Options.Add(concurrentlyOption);
         command.Options.Add(tenantsOption);
@@ -210,6 +218,8 @@ public static class PublishCommand
                         AllowDestructive = parseResult.GetValue(allowDestructiveOption),
                         AllowSuperuserStatements = parseResult.GetValue(allowSuperuserStatementsOption),
                         AllowLockLimit = parseResult.GetValue(allowLockLimitOption),
+                        // --apply-secrets alone sends every secret; with names, those (G-132).
+                        ApplySecrets = parseResult.GetResult(applySecretsOption) is null ? null : DiffCommand.SplitTenantIdentifiers(parseResult.GetValue(applySecretsOption)),
                         LockTimeout = lockTimeout,
                         Concurrently = concurrently,
                         CommentsOnly = commentsOnly,

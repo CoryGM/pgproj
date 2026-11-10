@@ -79,6 +79,12 @@ public static partial class ServerRoleRequirements
             Name(owner.OwnerRole, $"{owner.ObjectKind} {owner.ObjectKey} (owner)");
         }
 
+        // The role a user mapping is for (G-132), unless it is PUBLIC or the deploying role.
+        foreach (var mapping in model.UserMappings.Values.Where(static mapping => mapping.Role != PgProj.Parser.UserMappingNode.CurrentUser))
+        {
+            Name(mapping.Role, $"user mapping on server {mapping.Server}");
+        }
+
         var script = StripComments(preDeployScript);
         var scriptCreatesRoles = script is not null && CreateRoleRegex().IsMatch(script);
         return namedBy

@@ -13,13 +13,14 @@ public sealed class SecretRedactionTests
     [TestMethod]
     [DataRow("CREATE SUBSCRIPTION s CONNECTION 'host=h dbname=d user=u password=secret' PUBLICATION p WITH (connect = false);", "CREATE SUBSCRIPTION", "password=*****")]
     [DataRow("ALTER SUBSCRIPTION s CONNECTION 'host=h password = secret port=5432';", "ALTER SUBSCRIPTION", "password = *****")]
-    [DataRow("CREATE USER MAPPING FOR bob SERVER srv OPTIONS (user 'u', password 'hunter2');", "CREATE USER MAPPING", "password '*****'")]
+    // The modeled CREATE SERVER and CREATE USER MAPPING (G-132) quote no statement; their ALTER forms are still reported, and masked.
+    [DataRow("ALTER USER MAPPING FOR b SERVER s OPTIONS (ADD password 'hunter2');", "ALTER USER MAPPING", "ADD password '*****'")]
     [DataRow("ALTER USER MAPPING FOR bob SERVER srv OPTIONS (SET password 'hunter2');", "ALTER USER MAPPING", "SET password '*****'")]
-    [DataRow("CREATE SERVER s FOREIGN DATA WRAPPER w OPTIONS (host 'h', PASSWORD 'hunter2', dbname 'd');", "CREATE SERVER", "PASSWORD '*****'")]
+    [DataRow("ALTER SERVER s OPTIONS (ADD host 'h', ADD PASSWORD 'hunter2', ADD dbname 'd');", "ALTER SERVER", "PASSWORD '*****'")]
     [DataRow("CREATE ROLE app LOGIN ENCRYPTED PASSWORD 'hunter2';", "CREATE ROLE", "ENCRYPTED PASSWORD '*****'")]
     [DataRow("ALTER ROLE app WITH PASSWORD 'it''s hunter2';", "ALTER ROLE", "WITH PASSWORD '*****'")]
-    [DataRow("CREATE SERVER s FOREIGN DATA WRAPPER w OPTIONS (dsn 'postgresql://bob:hunter2@host/db');", "CREATE SERVER", "bob:*****@host")]
-    [DataRow("CREATE SERVER s FOREIGN DATA WRAPPER w OPTIONS (api_key 'hunter2', token 'hunter2');", "CREATE SERVER", "api_key '*****', token '*****'")]
+    [DataRow("ALTER SERVER s OPTIONS (SET dsn 'postgresql://bob:hunter2@host/db');", "ALTER SERVER", "bob:*****@host")]
+    [DataRow("ALTER SERVER s OPTIONS (ADD api_key 'hunter2', ADD token 'hunter2');", "ALTER SERVER", "api_key '*****', ADD token '*****'")]
     public void AStatementTheWarningQuotesHasItsPasswordMasked(string sql, string kind, string maskedPart)
     {
         var diagnostic = Parse(sql).Diagnostics.Single(static d => d.Source == "UnmodeledStatement");

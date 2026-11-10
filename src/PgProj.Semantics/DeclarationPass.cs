@@ -1,4 +1,4 @@
-﻿using PgProj.Parser;
+using PgProj.Parser;
 
 namespace PgProj.Semantics;
 
@@ -36,6 +36,9 @@ internal sealed class DeclarationPass
         model.TextSearchDictionaries = new Dictionary<string, TextSearchDictionaryDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
         model.TextSearchConfigurations = new Dictionary<string, TextSearchConfigurationDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
         model.Publications = new Dictionary<string, PublicationDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+        model.ForeignDataWrappers = new Dictionary<string, ForeignDataWrapperDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+        model.ForeignServers = new Dictionary<string, ForeignServerDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
+        model.UserMappings = new Dictionary<string, UserMappingDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
         model.Owners = new Dictionary<string, OwnerDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
         model.SchemaDefinitions = new Dictionary<string, SchemaDefinition>(PgProj.Parser.SqlIdentifiers.NameComparer);
         model.SemanticGraph = SemanticGraph.Empty;
@@ -62,6 +65,7 @@ internal sealed class DeclarationPass
             DeclareStatistics(syntaxTree, model);
             DeclareTextSearch(syntaxTree, model);
             DeclarePublications(syntaxTree, model);
+            DeclareForeignData(syntaxTree, model);
             DeclareIndexes(syntaxTree, model);
             DeclareTypes(syntaxTree, model);
             DeclareGrants(syntaxTree, model, excludeGrants, excludeRoleMemberships);
@@ -530,6 +534,72 @@ internal sealed class DeclarationPass
         };
     }
 
+    /// <summary>
+    /// Foreign data wrappers, servers, and user mappings (G-132, the user's design of 2026-11-10), with the comments on wrappers and servers. A user mapping's literal
+    /// password is deployed, never compared, and warned about: it belongs in a variable, `:'name'`, given at publish time (item 6).
+    /// </summary>
+    private static void DeclareForeignData(SqlSyntaxTree tree, DatabaseModel model)
+    {
+        var wrappers = GetMutableDefinitions(model.ForeignDataWrappers, nameof(DatabaseModel.ForeignDataWrappers));
+        var servers = GetMutableDefinitions(model.ForeignServers, nameof(DatabaseModel.ForeignServers));
+        var mappings = GetMutableDefinitions(model.UserMappings, nameof(DatabaseModel.UserMappings));
+        var diagnostics = GetMutableDiagnostics(model.Diagnostics);
+
+        foreach (var node in tree.Nodes.OfType<ForeignDataWrapperNode>().Where(static node => node.Name is not null))
+        {
+            AddDefinition(wrappers, new ForeignDataWrapperDefinition(ForeignDataKeys.Wrapper(node.Name!), node.Name!)
+            {
+                Handler = node.Handler,
+                Validator = node.Validator,
+                Options = ForeignOptionDefinition.From(node.Options),
+                DeclarationNode = node,
+                Location = Place(tree, node),
+            }, diagnostics);
+        }
+
+        foreach (var node in tree.Nodes.OfType<ForeignServerNode>().Where(static node => node.Name is not null))
+        {
+            AddDefinition(servers, new ForeignServerDefinition(ForeignDataKeys.Server(node.Name!), node.Name!, node.Wrapper)
+            {
+                ServerType = node.ServerType,
+                Version = node.Version,
+                Options = ForeignOptionDefinition.From(node.Options),
+                DeclarationNode = node,
+                Location = Place(tree, node),
+            }, diagnostics);
+        }
+
+        foreach (var node in tree.Nodes.OfType<UserMappingNode>())
+        {
+            var mapping = new UserMappingDefinition(ForeignDataKeys.UserMapping(node.Role, node.Server), $"{node.Role} on {node.Server}", node.Role, node.Server)
+            {
+                Options = ForeignOptionDefinition.From(node.Options),
+                DeclarationNode = node,
+                Location = Place(tree, node),
+            };
+            AddDefinition(mappings, mapping, diagnostics);
+            if (mapping.Options.Any(static option => option.IsPassword && option.Variable is null))
+            {
+                diagnostics.Add(SemanticDiagnostics.Warning(
+                    $"The user mapping for {node.Role} on server {node.Server} writes its password in the project, where anyone who can read the project can read it. Name it with a variable instead, OPTIONS (password :'name'), and give it at publish time in PGPROJ_VAR_name. The password is deployed when the mapping is created and is never compared.",
+                    mapping.Location,
+                    nameof(DeclarationPass)));
+            }
+        }
+
+        foreach (var comment in tree.ObjectComments.Where(static node => node.ObjectKind is "ForeignDataWrapper" or "ForeignServer"))
+        {
+            var name = comment.TableName ?? string.Empty;
+            if (comment.ObjectKind == "ForeignDataWrapper" && wrappers.TryGetValue(ForeignDataKeys.Wrapper(name), out var wrapper))
+            {
+                wrappers[wrapper.Key] = wrapper with { Comment = comment.CommentText };
+            }
+            else if (comment.ObjectKind == "ForeignServer" && servers.TryGetValue(ForeignDataKeys.Server(name), out var server))
+            {
+                servers[server.Key] = server with { Comment = comment.CommentText };
+            }
+        }
+    }
     private static void DeclarePublications(SqlSyntaxTree tree, DatabaseModel model)
     {
         var publications = GetMutableDefinitions(model.Publications, nameof(DatabaseModel.Publications));

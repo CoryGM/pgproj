@@ -80,6 +80,12 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
   functions and creates them again, or is refused, naming what uses the type, when something does. A removed type is dropped with `CASCADE`, after a
   check that only its own functions depend on it. Every option is compared with PostgreSQL's default for one not stated, and `LIKE` with the values the
   database has ([Base types](docs/notes/base-types.md)).
+- **Foreign data wrappers, servers, and user mappings are modeled:** `CREATE FOREIGN DATA WRAPPER`, `CREATE SERVER`, and `CREATE USER MAPPING`, with
+  their grants, owners, and comments, are deployed, read back, compared, and written by `init`, where before `build` warned about them and left them out.
+  A server's or mapping's option can name its value with a variable, `:'name'`, given in `PGPROJ_VAR_<name>`: such a value, and any `password`, is never
+  compared, read back, or shown. A mapping's secret is sent when the mapping is created; the new `publish --apply-secrets [names]` sends the current values
+  to mappings that exist. `init` writes each password as a variable and names the variables to set. A wrapper of the project's own needs
+  `--allow-superuser-statements`; dropping a server or a mapping needs `--allow-destructive` ([Foreign data](docs/notes/foreign-data.md)).
 
 ### Library
 
@@ -88,6 +94,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 - **`PublishRequest.Variables`** gives the deploy scripts' variables their values for `PublishMode.Execute`, and **`PublishNoticeKind.Variables`** is the
   warning of a plan whose kept script uses variables, and the refusal of a run that lacks one.
 - **`PublishNoticeKind.PublicGrant`** is the warning that the script gives `PUBLIC` a privilege on an object the database already has.
+- **`PublishRequest.ApplySecrets`** sends the secrets of user mappings that exist again (`publish --apply-secrets`): null for none, empty for every variable
+  their options name, or the variables to send.
 
 ## [0.2.1] - 2026-10-23
 

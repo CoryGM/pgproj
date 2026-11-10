@@ -68,7 +68,8 @@ internal static class GrantPrivilegeSets
             return FunctionPrivileges;
         }
 
-        return StartsWithAny(objectKey, "type:", "default types") ? TypePrivileges : null;
+        // A foreign data wrapper or server has USAGE alone, as a type has (G-132).
+        return StartsWithAny(objectKey, "type:", "default types", "foreign data wrapper:", "server:") ? TypePrivileges : null;
     }
 
     private static bool StartsWithAny(string objectKey, params string[] prefixes)

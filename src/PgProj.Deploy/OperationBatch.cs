@@ -99,7 +99,7 @@ public sealed record class OperationBatch
         // check only guards a grant/role membership that disappears with nothing replacing it).
         var recreatedNodeIds = Operations
             .OfType<CreateOperation>()
-            .Where(static create => create.NodeKind is ChangeNodeKind.Grant or ChangeNodeKind.EventTrigger or ChangeNodeKind.Cast or ChangeNodeKind.Operator or ChangeNodeKind.Rule or ChangeNodeKind.Aggregate or ChangeNodeKind.Publication)
+            .Where(static create => create.NodeKind is ChangeNodeKind.Grant or ChangeNodeKind.EventTrigger or ChangeNodeKind.Cast or ChangeNodeKind.Operator or ChangeNodeKind.Rule or ChangeNodeKind.Aggregate or ChangeNodeKind.Publication or ChangeNodeKind.ForeignServer or ChangeNodeKind.UserMapping)
             .Select(static create => create.NodeId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -162,6 +162,11 @@ public sealed record class OperationBatch
             // A publication that only disappears stops sending its tables' changes to every subscriber; one whose FOR ALL TABLES changes is dropped and created again (G-134).
             DropOperation { Node: PublicationDefinition publication } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [$"publication dropped; subscribers stop receiving what {publication.Name} sent"] },
+            // A server or user mapping that only disappears stops every foreign table and connection through it (G-132, the user's choice of 2026-11-10).
+            DropOperation { Node: ForeignServerDefinition server } drop when !recreatedNodeIds.Contains(drop.NodeId)
+                => new DestructiveOperation { Operation = drop, Reasons = [$"foreign server dropped; every foreign table and connection through {server.Name} stops working"] },
+            DropOperation { Node: UserMappingDefinition mapping } drop when !recreatedNodeIds.Contains(drop.NodeId)
+                => new DestructiveOperation { Operation = drop, Reasons = [$"user mapping dropped; {mapping.Role} no longer connects through {mapping.Server} with it"] },
             DropOperation { Node: AggregateDefinition aggregate } drop when !recreatedNodeIds.Contains(drop.NodeId)
                 => new DestructiveOperation { Operation = drop, Reasons = [$"aggregate dropped; every query that calls {aggregate.Name} stops working"] },
             DropOperation { Node: RuleDefinition rule } drop when !recreatedNodeIds.Contains(drop.NodeId)

@@ -206,6 +206,17 @@ public sealed partial class PgProjEngine
             messages.Add(new(EngineEventLevel.Warning, $"Left out {(shells.Length == 1 ? "a shell type" : "shell types")} with no definition (CREATE TYPE name; and nothing after it): {string.Join(", ", shells)}. pgproj models a base type with its definition, not a shell alone."));
         }
 
+        // A user mapping's password is never read, and is written as a variable (G-132, the user's design of 2026-11-10, item 7): the user gives it at publish time.
+        var passwordVariables = scaffold.Files
+            .SelectMany(static file => System.Text.RegularExpressions.Regex.Matches(file.Content, @"(?m)^CREATE USER MAPPING .*:'(?<name>[A-Za-z0-9_]+)'").Select(static match => match.Groups["name"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (passwordVariables.Length > 0)
+        {
+            messages.Add(new(EngineEventLevel.Warning, $"Wrote each user mapping's password as a variable, since pgproj never reads one: {string.Join(", ", passwordVariables.Select(static name => $":'{name}'"))}. Set {string.Join(", ", passwordVariables.Select(static name => $"PGPROJ_VAR_{name}"))} before publish --execute creates the mapping."));
+        }
+
         // An INVALID index is left out as pg_dump leaves it out (G-271): it is not used by queries, and the project should state the index it was meant to be.
         if (scaffold.UnsupportedObjects.Where(static item => item.ObjectType == UnsupportedObject.InvalidIndex).Select(static item => $"{item.SchemaName}.{item.Name}").ToArray() is { Length: > 0 } invalidIndexes)
         {

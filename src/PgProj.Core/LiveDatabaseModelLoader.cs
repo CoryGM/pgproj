@@ -69,19 +69,20 @@ public sealed partial class LiveDatabaseModelLoader
             var statistics = await ReadStatisticsAsync(connection, schemaFilter, cancellationToken);
             var textSearch = await ReadTextSearchAsync(connection, schemaFilter, cancellationToken);
             var publications = await ReadPublicationsAsync(connection, schemaFilter, cancellationToken);
+            var foreignData = await ReadForeignDataAsync(connection, cancellationToken);
             var grants = await ReadGrantsAsync(connection, schemaFilter, cancellationToken);
 
             // The owner of every object read above, unless the project leaves owners out (G-146); it is the same read on both sides of a diff, as grants are.
             var owners = excludeOwners
                 ? []
-                : BuildOwnerSnapshots(await ReadOwnerRowsAsync(connection, cancellationToken), schemas, tables, views, sequences, functions, types, operators, aggregates, eventTriggers, publications, collations, statistics, textSearch);
+                : BuildOwnerSnapshots(await ReadOwnerRowsAsync(connection, cancellationToken), schemas, tables, views, sequences, functions, types, operators, aggregates, eventTriggers, publications, collations, statistics, textSearch, foreignData);
 
-            var snapshotSql = GenerateSnapshotSql(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch);
+            var snapshotSql = GenerateSnapshotSql(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch, foreignData);
             var model = BuildModelFromSnapshotSql(
                 snapshotSql,
                 excludeGrants,
                 excludeRoleMemberships,
-                () => BuildScaffoldFiles(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch),
+                () => BuildScaffoldFiles(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch, foreignData: foreignData),
                 excludeOwners);
             if (excludeGrants)
             {
@@ -92,6 +93,7 @@ public sealed partial class LiveDatabaseModelLoader
             model.LiveDependencies = [.. await ReadDependenciesAsync(connection, cancellationToken), .. await ReadRoutineDependenciesAsync(connection, cancellationToken)];
             model.LiveOwners = await ReadViewOwnersAsync(connection, cancellationToken);
             model.Types = WithLiveExtensionFacts(model.Types, types);
+            model.UserMappings = WithUnreadableOptions(model.UserMappings, foreignData);
             model.Views = ServerViewRenderer.WithOutputColumns(model.Views, await ReadViewOutputColumnsAsync(connection, cancellationToken));
 
             ServerViewRenderer.AttachLiveRenderings(model, views);
@@ -229,12 +231,14 @@ public sealed partial class LiveDatabaseModelLoader
         IReadOnlyList<LiveOwnerSnapshot>? owners = null,
         IReadOnlyList<LiveCollationSnapshot>? collations = null,
         IReadOnlyList<LiveStatisticsSnapshot>? statistics = null,
-        LiveTextSearchSnapshot? textSearch = null)
+        LiveTextSearchSnapshot? textSearch = null,
+        LiveForeignDataSnapshot? foreignData = null)
     {
         ArgumentNullException.ThrowIfNull(schemas);
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(constraints);
         ArgumentNullException.ThrowIfNull(indexes);
+        foreignData ??= LiveForeignDataSnapshot.Empty;
         views ??= [];
         functions ??= [];
         types ??= [];
@@ -599,6 +603,9 @@ public sealed partial class LiveDatabaseModelLoader
         {
             builder.AppendLine();
         }
+
+        // Foreign data wrappers, servers, and user mappings (G-132).
+        builder.Append(BuildForeignDataStatements(foreignData, scaffold: false));
 
         foreach (var grant in grants
             .OrderBy(static grant => grant.SchemaName, StringComparer.OrdinalIgnoreCase)

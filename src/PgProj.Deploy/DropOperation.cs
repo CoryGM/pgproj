@@ -34,6 +34,9 @@ public sealed record class DropOperation : SqlOperation
             CollationDefinition collation => $"DROP COLLATION {CreateOperation.FormatCollationName(collation)};",
             AggregateDefinition aggregate => $"DROP AGGREGATE {CreateOperation.FormatAggregateName(aggregate)} ({CreateOperation.FormatAggregateArguments(aggregate)});",
             PublicationDefinition publication => $"DROP PUBLICATION {QuoteIdentifier(publication.Name)};",
+            ForeignDataWrapperDefinition wrapper => ForeignDataSql.DropWrapper(wrapper),
+            ForeignServerDefinition server => ForeignDataSql.DropServer(server),
+            UserMappingDefinition mapping => ForeignDataSql.DropMapping(mapping),
             PolicyDefinition policy => $"DROP POLICY {QuoteIdentifier(policy.Name)} ON {FormatQualifiedName(policy.SchemaName, policy.TableName ?? "<table>")};",
             SequenceDefinition sequence => sequence.IsIdentityOwned
                 ? $"-- Sequence {FormatQualifiedName(sequence.SchemaName, sequence.Name)} is dropped implicitly with its identity column/table; no explicit DROP SEQUENCE required."

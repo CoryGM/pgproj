@@ -16,6 +16,9 @@ public sealed record class AlterOperation : SqlOperation
             IndexDefinition newIndex when Change.OldNode is IndexDefinition oldIndex => GenerateAlterIndex(oldIndex, newIndex, Change.Details),
             ViewDefinition newView => GenerateAlterView(Change.OldNode as ViewDefinition, newView),
             PublicationDefinition newPublication when Change.OldNode is PublicationDefinition oldPublication => CreateOperation.GenerateAlterPublication(oldPublication, newPublication, Change.Details),
+            ForeignDataWrapperDefinition newWrapper when Change.OldNode is ForeignDataWrapperDefinition oldWrapper => ForeignDataSql.AlterWrapper(oldWrapper, newWrapper),
+            ForeignServerDefinition newServer when Change.OldNode is ForeignServerDefinition oldServer => ForeignDataSql.AlterServer(oldServer, newServer),
+            UserMappingDefinition newMapping when Change.OldNode is UserMappingDefinition oldMapping => ForeignDataSql.AlterMapping(oldMapping, newMapping),
             TextSearchDictionaryDefinition newDictionary when Change.OldNode is TextSearchDictionaryDefinition oldDictionary => TextSearchSqlBuilder.AlterDictionary(oldDictionary, newDictionary),
             TextSearchConfigurationDefinition newConfiguration when Change.OldNode is TextSearchConfigurationDefinition oldConfiguration => TextSearchSqlBuilder.AlterConfiguration(oldConfiguration, newConfiguration),
             CollationDefinition newCollation => CommentSqlHelper.GenerateObjectComment("COLLATION", newCollation.SchemaName, newCollation.Name, newCollation.Comment)

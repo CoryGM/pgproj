@@ -63,6 +63,19 @@ internal static class SuperuserStatements
                 continue;
             }
 
+            // A foreign data wrapper is created, altered, or dropped only by a superuser, and its owner must be one (G-132, checked on 14 to 18).
+            if (operation.NodeKind == ChangeNodeKind.ForeignDataWrapper)
+            {
+                Add(operation.NodeKind, operation.NodeId, "a foreign data wrapper is created, changed, or dropped only by a superuser");
+                continue;
+            }
+
+            if (operation is CreateOperation { Node: OwnerDefinition { ObjectKind: "foreign data wrapper" } wrapperOwner })
+            {
+                Add(operation.NodeKind, wrapperOwner.ObjectKey, "a foreign data wrapper's owner must be a superuser");
+                continue;
+            }
+
             // A base type, and its shell, are created only by a superuser, and its options changed only by one, even by its owner (G-267, checked on 14 to 18).
             if (operation is BaseTypeShellOperation or CreateOperation { Node: TypeDefinition { IsBaseType: true } })
             {

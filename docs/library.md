@@ -257,6 +257,10 @@ messages keep the placeholders, and a value the server quotes in an error is mas
 variable has no value; a `Plan` warns, with the same kind, which variables a kept script needs. `tenant_schema` and `tenant_id` cannot be given
 ([Variables in the deploy scripts](notes/variables.md)).
 
+**Secrets of user mappings.** A foreign server's or user mapping's option may name its value with a variable too, sent when the mapping is created.
+`ApplySecrets` sends the values again to mappings that exist: null (the default) for none, empty for every variable their options name, or the names to
+ send ([Foreign data](notes/foreign-data.md)).
+
 A `PublishResult` has the compare part (`Compare`), one `PublishPart` per transaction (the whole project, or the shared schemas and each tenant), the `Script` as
 `publish` prints it, the `Warnings` and `Refusals` (each a `PublishNotice` with a `Kind`, such as `Destructive`, `Superuser`, `LockRewrite`, or
 `MissingRole`, the objects it names as `Items`, and the `Text` the command line prints), and after `Execute`, `Execution`: the parts published, the part that

@@ -55,12 +55,19 @@ internal sealed record PublishUnit(
         int serverMajorVersion,
         IReadOnlySet<(string Schema, string Name)>? relationNames,
         IReadOnlyCollection<string> untrustedLanguages,
-        IProgress<EngineEvent>? progress)
+        IProgress<EngineEvent>? progress,
+        IReadOnlyList<string>? applySecrets = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
         var dependencyGraph = ScriptComposition.BuildDependencyGraph(liveModel, projectModel);
         var fullBatch = ScriptComposition.Generate(changes, dependencyGraph, deployScripts.Pre, deployScripts.Post);
+        if (applySecrets is not null)
+        {
+            // --apply-secrets (G-132): the secrets of user mappings that exist, sent again; a mapping this script creates is sent its secret anyway.
+            fullBatch = fullBatch with { Operations = [.. fullBatch.Operations, .. ApplySecretsOperation.For(projectModel, liveModel, fullBatch, applySecrets)] };
+        }
+
         var batch = fullBatch;
         if (commentsOnly)
         {

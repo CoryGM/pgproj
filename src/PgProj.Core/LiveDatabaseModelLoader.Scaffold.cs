@@ -83,15 +83,16 @@ public sealed partial class LiveDatabaseModelLoader
             var statistics = await ReadStatisticsAsync(connection, scope, cancellationToken);
             var textSearch = await ReadTextSearchAsync(connection, scope, cancellationToken);
             var publications = await ReadPublicationsAsync(connection, scope, cancellationToken);
+            var foreignData = await ReadForeignDataAsync(connection, cancellationToken);
             var allGrants = WithoutServerDefaultRevokes(await ReadGrantsAsync(connection, scope, cancellationToken), connection.PostgreSqlVersion.Major);
             var grants = FilterGrantsForScaffold(allGrants, options.ExcludeGrants, options.ExcludeRoleMemberships);
 
             // Owners are always read, for the report (who owns what was modeled, and how many an option left out); they go into the files unless excluded.
-            var allOwners = BuildOwnerSnapshots(await ReadOwnerRowsAsync(connection, cancellationToken), schemas, tables, views, sequences, functions, types, operators, aggregates, eventTriggers, publications, collations, statistics, textSearch);
+            var allOwners = BuildOwnerSnapshots(await ReadOwnerRowsAsync(connection, cancellationToken), schemas, tables, views, sequences, functions, types, operators, aggregates, eventTriggers, publications, collations, statistics, textSearch, foreignData);
             var owners = options.ExcludeOwners ? [] : allOwners;
 
             var modeled = new List<ScaffoldedObject>();
-            var files = BuildScaffoldFiles(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch, modeled, options.CaseSensitivePaths);
+            var files = BuildScaffoldFiles(schemas, tables, constraints, indexes, views, functions, types, grants, sequences, triggers, policies, eventTriggers, casts, operators, rules, aggregates, publications, owners, collations, statistics, textSearch, modeled, options.CaseSensitivePaths, foreignData);
 
             // A file pgproj cannot parse would give the new project a build that fails, or leave the object out (G-121): refuse instead.
             var unparseable = FindUnparseableFiles(files);
@@ -363,7 +364,8 @@ public sealed partial class LiveDatabaseModelLoader
         IReadOnlyList<LiveStatisticsSnapshot>? statistics = null,
         LiveTextSearchSnapshot? textSearch = null,
         List<ScaffoldedObject>? modeled = null,
-        bool caseSensitivePaths = false)
+        bool caseSensitivePaths = false,
+        LiveForeignDataSnapshot? foreignData = null)
     {
         // Two paths are one file when the file system the files are written to says so (G-212).
         var pathComparer = caseSensitivePaths ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
@@ -765,6 +767,31 @@ public sealed partial class LiveDatabaseModelLoader
             GetOrCreateFile(relativePath).AppendLine(BuildCreatePublicationStatement(publication));
             pathByOwnerKey[OwnerKey("publication", null, publication.Name, string.Empty)] = relativePath;
             Record(null, "Publication", publication.Name, relativePath);
+        }
+
+        // A foreign data wrapper of the database's own, and a server with its user mappings, a file each (G-132); their grants and owners go in the same file.
+        foreach (var wrapper in (foreignData ?? LiveForeignDataSnapshot.Empty).Wrappers)
+        {
+            var relativePath = MakeUniquePath($"ForeignDataWrapper/{SanitizeSegment(wrapper.Name)}.sql", usedPaths);
+            GetOrCreateFile(relativePath).AppendLine(BuildCreateForeignDataWrapperStatement(wrapper));
+            pathByObjectKey[PgProj.Semantics.ForeignDataKeys.Wrapper(wrapper.Name)] = relativePath;
+            pathByOwnerKey[OwnerKey("foreign data wrapper", null, wrapper.Name, string.Empty)] = relativePath;
+            Record(null, "Foreign data wrapper", wrapper.Name, relativePath);
+        }
+
+        foreach (var server in (foreignData ?? LiveForeignDataSnapshot.Empty).Servers)
+        {
+            var relativePath = MakeUniquePath($"Server/{SanitizeSegment(server.Name)}.sql", usedPaths);
+            var builder = GetOrCreateFile(relativePath).AppendLine(BuildCreateServerStatement(server));
+            foreach (var mapping in foreignData!.Mappings.Where(mapping => mapping.Server == server.Name))
+            {
+                builder.AppendLine(BuildCreateUserMappingStatement(mapping, scaffold: true));
+                Record(null, "User mapping", $"{mapping.Role} on {mapping.Server}", relativePath);
+            }
+
+            pathByObjectKey[PgProj.Semantics.ForeignDataKeys.Server(server.Name)] = relativePath;
+            pathByOwnerKey[OwnerKey("server", null, server.Name, string.Empty)] = relativePath;
+            Record(null, "Server", server.Name, relativePath);
         }
 
         // A base type's support functions are already in its file.
