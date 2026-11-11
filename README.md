@@ -54,6 +54,14 @@ sudo curl -fsSL -o /etc/yum.repos.d/pgproj.repo https://corygm.github.io/pgproj/
 sudo dnf install pgproj
 ```
 
+**Windows:** install with [winget](https://learn.microsoft.com/windows/package-manager/winget/), and update it with `winget upgrade CoryMaass.pgproj`
+(x64 and Arm64). It runs the same signed installer as the releases page, which asks for administrator rights and puts `pgproj` on the PATH; open a new
+terminal afterwards. A version installed from the releases page is upgraded by winget too.
+
+```powershell
+winget install CoryMaass.pgproj
+```
+
 **With .NET 10** (any of the platforms below): install the [.NET tool](https://www.nuget.org/packages/pgproj) from nuget.org, and update it with
 `dotnet tool update --global pgproj`. Unlike the other builds it needs the .NET 10 runtime installed.
 
