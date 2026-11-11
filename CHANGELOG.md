@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 
 ## [Unreleased]
 
+### Installing
+
+- **pgproj can be installed and updated with winget:** `winget install CoryMaass.pgproj`, then `winget upgrade CoryMaass.pgproj` (x64 and Arm64). It
+  installs the signed MSI of the newest release, and upgrades a version installed from the releases page.
+
 ### Documentation
 
 - **The README and the destructive-changes note say plainly that pgproj comes with no warranty:** a publish can drop objects and their data,

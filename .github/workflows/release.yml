@@ -12,6 +12,10 @@ name: Release
 # the GitHub Release and skips nuget.org. The CLI as a .NET tool, the package pgproj (G-323; dotnet tool install -g pgproj), is packed, verified
 # (packaging/nuget/verify-tool.sh: installed with dotnet tool install and smoke-tested), attached, and pushed beside it, the same way.
 #
+# A final (not pre-release) tag also submits the winget package CoryMaass.pgproj (G-350): wingetcreate writes the manifest for the release's two
+# MSIs and opens a pull request to microsoft/winget-pkgs from the fork of the account that owns WINGET_TOKEN. It runs only when the repository
+# variable WINGET_PUBLISH is "true"; winget's own validation then installs the MSI before the pull request is merged.
+#
 # The Linux packages are signed (G-331): the .rpm files, the release's SHA256SUMS.txt (SHA256SUMS.txt.asc), and the signed apt and dnf
 # repositories that a tag publishes to GitHub Pages (https://corygm.github.io/pgproj, packaging/linux/build-repository.sh). Without the key a
 # throwaway one is used to test every signing step, and nothing signed with it is released or published.
@@ -25,6 +29,8 @@ name: Release
 #                                  secrets of the environment "release": the app registration allowed to sign with the certificate profile
 #   LINUX_SIGNING_KEY              the Linux signing key, an armored OpenPGP secret key (DEVELOPING.md, "Releasing", Signing)
 #   LINUX_SIGNING_PASSPHRASE       its passphrase
+#   WINGET_TOKEN                   a classic personal access token (scope public_repo) of the account whose fork of microsoft/winget-pkgs
+#                                  receives the manifest; used only when the variable WINGET_PUBLISH is "true"
 # Without them the Windows files are built unsigned, and the Linux .rpm files and checksums are unsigned and no repository is published. macOS
 # files are never signed by an Apple Developer ID or notarized.
 
@@ -454,6 +460,39 @@ jobs:
 
       - name: Push the .NET tool pgproj
         run: dotnet nuget push "nupkg/pgproj.${{ needs.version.outputs.version }}.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  winget-publish:
+    name: Submit to winget
+    if: github.ref_type == 'tag' && needs.version.outputs.prerelease != 'true' && vars.WINGET_PUBLISH == 'true'
+    needs: [version, release]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions: {} # the pull request is made with WINGET_TOKEN, not this workflow's token
+    env:
+      WINGETCREATE: v1.12.13.0 # microsoft/winget-create, the release's wingetcreate.exe
+      WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+    steps:
+      - name: Download wingetcreate
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          Invoke-WebRequest "https://github.com/microsoft/winget-create/releases/download/$env:WINGETCREATE/wingetcreate.exe" -OutFile $exe
+          $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash
+          if ($hash -ne $env:WINGETCREATE_SHA256) { throw "wingetcreate $env:WINGETCREATE has SHA256 $hash" }
+          "WINGETCREATE_EXE=$exe" >> $env:GITHUB_ENV
+
+      - name: Submit the manifest of CoryMaass.pgproj
+        shell: pwsh
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }} # read by wingetcreate, so the token is not on its command line
+        run: |
+          $version = '${{ needs.version.outputs.version }}'
+          $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME"
+          & $env:WINGETCREATE_EXE update CoryMaass.pgproj --version $version `
+            --urls "$base/pgproj-$version-win-x64.msi|x64" "$base/pgproj-$version-win-arm64.msi|arm64" `
+            --release-notes-url "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:GITHUB_REF_NAME" `
+            --prtitle "Update: CoryMaass.pgproj to $version" --submit --no-open
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate exited with $LASTEXITCODE" }
 
   repository:
     name: Publish the apt and dnf repositories

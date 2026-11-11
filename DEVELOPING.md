@@ -282,8 +282,23 @@ version, for example `0.1.0-preview.0.181`; `pgproj --version` prints it (System
    `.nupkg` and `.snupkg` to the release, and pushes them to nuget.org last (job `nuget-publish`), only when the repository variable `NUGET_PUBLISH` is `true`
    (set once the Trusted Publishing policy exists; without it the release is made and nuget.org is skipped). The CLI as a .NET tool, the package
    `pgproj` (G-323), goes the same way beside it: packed, installed with `dotnet tool install` and smoke-tested on Linux, Windows, and macOS
-   (`packaging/nuget/verify-tool.sh`), attached, and pushed. Running the workflow by hand (Actions, Run workflow) is a dry
+   (`packaging/nuget/verify-tool.sh`), attached, and pushed. For a final version (not a pre-release) the job `winget-publish` submits the winget
+   package `CoryMaass.pgproj` (G-350, below). Running the workflow by hand (Actions, Run workflow) is a dry
    run: it builds and verifies everything, the package included, and keeps the files as workflow artifacts; nothing is published.
+
+**The winget package.** `CoryMaass.pgproj` in [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/CoryMaass/pgproj)
+installs the release's MSIs (`win-x64`, `win-arm64`; `InstallerType: wix`, `Scope: machine`). winget recognizes an installed pgproj by the MSI's
+UpgradeCode, so it also upgrades one installed from the releases page. The first manifest (0.3.0) was submitted by hand. After it, the job
+`winget-publish` runs `wingetcreate update` (version and SHA256 pinned in `release.yml`) with the two MSI URLs; wingetcreate downloads them, reads
+their product codes and hashes, writes the new manifest from the previous one, and opens a pull request to `microsoft/winget-pkgs` from the fork
+`CoryGM/winget-pkgs`. Microsoft's validation installs the MSI, and winget's moderators merge the pull request; until then `winget upgrade` offers the previous
+version. The job needs the repository variable `WINGET_PUBLISH` set to `true` and the secret `WINGET_TOKEN`: a
+**classic** personal access token of `CoryGM` with the scope `public_repo` (wingetcreate does not accept fine-grained tokens). It is the one long-lived
+token the workflow stores, so give it an expiry and renew it before then. A run that fails (an expired token, a manifest change Microsoft asks for) does
+not affect the release: run the job's `wingetcreate update` command by hand (without a token it asks you to log in to GitHub), or fix the pull request
+it opened.
+To change the package's description or tags, edit `CoryMaass.pgproj.locale.en-US.yaml` in a pull request to `microsoft/winget-pkgs`; the next
+`wingetcreate update` carries it forward.
 
 **The NuGet package.** One package, `PgProj.Engine`: the engine and the six assemblies it is built on (its project references are `PrivateAssets="all"` and
 packed into `lib/net10.0` by the `PackInnerAssemblies` target; their `.pdb` files go to the `.snupkg`), `libpg_query` for the five runtimes under
@@ -373,7 +388,7 @@ that builds them, which must be a .NET 10 runtime with OpenSSL 4 support (expect
 **Provenance.** The workflow attests build provenance (`gh attestation verify`) when the repository is public; the step is skipped while
 it is private, because attestations for private repositories need a plan this project does not have.
 
-**Tools.** MinVer (versions), nfpm (`.deb`, `.rpm`; container image `ghcr.io/goreleaser/nfpm`), WiX 5.0.2 (MSI), CycloneDX (SBOM), `NuGet/login` (Trusted
+**Tools.** MinVer (versions), nfpm (`.deb`, `.rpm`; container image `ghcr.io/goreleaser/nfpm`), WiX 5.0.2 (MSI), wingetcreate (the winget manifest), CycloneDX (SBOM), `NuGet/login` (Trusted
 Publishing), GnuPG, `rpmsign` and `createrepo_c` (in a Fedora container) and `apt-ftparchive` (in a Debian one) for the Linux signing and repositories, and
 `actions/upload-pages-artifact` and `actions/deploy-pages` (GitHub Pages). WiX 6
 and later make the person installing it accept a fee-related EULA (`wix eula accept`), so 5.0.2 is pinned deliberately.
