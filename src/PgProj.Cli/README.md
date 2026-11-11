@@ -17,8 +17,8 @@ pgproj publish --target-connection "Host=localhost;Database=shop_test;Username=p
 - `pgproj init` turns an existing database into a project, one file per object; `pgproj document` writes a data dictionary and diagram.
 
 **Platforms:** this package needs the .NET 10 runtime, on win-x64, win-arm64, linux-x64, linux-arm64 (glibc), or osx-arm64, the platforms its PostgreSQL
-parser (libpg_query, PostgreSQL 18's grammar) is built for. PostgreSQL servers 14 to 18. Without .NET, use the self-contained builds, the installers, or the
-apt and dnf repositories ([Installing](https://github.com/CoryGM/pgproj#installing)).
+parser (libpg_query, PostgreSQL 18's grammar) is built for. PostgreSQL servers 14 to 18. Without .NET, use the self-contained builds, the installers, winget
+(`winget install CoryMaass.pgproj`), or the apt and dnf repositories ([Installing](https://github.com/CoryGM/pgproj#installing)).
 
 [pgproj](https://github.com/CoryGM/pgproj) · [Commands](https://github.com/CoryGM/pgproj/blob/main/docs/commands.md) ·
 [Changelog](https://github.com/CoryGM/pgproj/blob/main/CHANGELOG.md) · Apache-2.0

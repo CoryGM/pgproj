@@ -20,6 +20,17 @@ SmartScreen shows this the first time an unsigned program from the internet runs
 Windows builds are signed from the release after 0.2.0 (publisher Cory Maass); 0.2.0 and earlier are not. Choose **More info**, then **Run anyway**.
 The `.msi` asks the same once, when it installs.
 
+### Windows: `pgproj` is not recognized after `winget install`
+
+The installer adds pgproj's folder (`C:\Program Files\pgproj`) to the system PATH, and a terminal that was already open keeps the PATH it started
+with. Open a new terminal. If `pgproj` is still not found, check that it is installed with `winget list CoryMaass.pgproj`.
+
+### Windows: `winget upgrade` does not offer the newest version
+
+Each release reaches winget through a pull request to Microsoft's package repository, which Microsoft validates and merges, so the newest version can
+appear in winget a while after it is on the [releases page](https://github.com/CoryGM/pgproj/releases). Pre-releases are not published to winget. To
+update straight away, run the newest `.msi` from the releases page: it upgrades the installed version in place, and winget sees the new version.
+
 ### macOS: "pgproj" cannot be opened, or is damaged
 
 macOS quarantines a file downloaded with a browser, and pgproj is not notarized by Apple. Two files in the download are blocked: `pgproj` and the

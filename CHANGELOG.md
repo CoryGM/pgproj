@@ -9,7 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org/). A version is the
 ### Installing
 
 - **pgproj can be installed and updated with winget:** `winget install CoryMaass.pgproj`, then `winget upgrade CoryMaass.pgproj` (x64 and Arm64). It
-  installs the signed MSI of the newest release, and upgrades a version installed from the releases page.
+  installs the signed MSI of the newest release, and upgrades a version installed from the releases page. The README's Installing section says how,
+  and the troubleshooting page covers a terminal that does not find `pgproj` yet and a new version winget does not offer yet.
 
 ### Documentation
 
